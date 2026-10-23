@@ -1,4 +1,4 @@
-/* JavaScript ES5 para Safari antigo. YouTube Data API no navegador, sem servidor. */
+/* JavaScript ES5 para Safari antigo. Na VPS, MP4 pela API local. */
 (function () {
   "use strict";
   var message = document.getElementById("message");
@@ -74,18 +74,62 @@
     watch.className = "panel";
     query.value = "https://www.youtube.com/watch?v=" + id;
     title.textContent = param("t").slice(0, 160) || "Vídeo " + id;
-    status.textContent = "Carregando vídeo diretamente do YouTube…";
-    player.src = "https://www.youtube.com/embed/" + id + "?playsinline=1";
+    status.textContent = "Preparando vídeo para o Safari antigo…";
+    player.removeAttribute("src");
+    player.load();
+    prepareVideo(id);
     document.getElementById("youtube-link").href = "https://m.youtube.com/watch?v=" + id;
     document.getElementById("back-to-search").href = param("q") ?
       "?q=" + encodeURIComponent(param("q")) : "./";
     document.getElementById("alternate-player").onclick = function (event) {
       if (event && event.preventDefault) event.preventDefault();
       if (event) event.returnValue = false;
-      player.src = "https://www.youtube-nocookie.com/embed/" + id + "?playsinline=1";
-      status.textContent = "Tentando o endereço alternativo do YouTube…";
+      prepareVideo(id);
       return false;
     };
+  }
+  function backendRequest(path, callback) {
+    var xhr = new XMLHttpRequest();
+    try {
+      xhr.open("GET", path, true);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        try {
+          var data = JSON.parse(xhr.responseText);
+          callback(xhr.status >= 200 && xhr.status < 300 ? null : (data.error || "Erro no servidor"), data);
+        } catch (error) { callback("Não foi possível conversar com a VPS.", null); }
+      };
+      xhr.onerror = function () { callback("Sem conexão com a VPS.", null); };
+      xhr.send(null);
+    } catch (error) { callback("Falha de conexão com o servidor.", null); }
+  }
+  function prepareVideo(id) {
+    status.textContent = "Solicitando vídeo à VPS…";
+    backendRequest("/api/prepare/" + id, function (error, data) {
+      if (error) { status.textContent = error + ". Abra o RetroTube pelo endereço da sua VPS."; return; }
+      updateVideo(id, data);
+    });
+  }
+  function updateVideo(id, data) {
+    if (!data) { status.textContent = "Servidor não respondeu."; return; }
+    if (data.status === "pronto") {
+      status.textContent = "Vídeo pronto! Toque no botão de reprodução.";
+      player.src = "/api/video/" + id;
+      player.load();
+      return;
+    }
+    if (data.status === "erro") {
+      status.textContent = "Não foi possível preparar este vídeo: " + (data.message || "erro desconhecido");
+      return;
+    }
+    var labels = { na_fila: "Aguardando vaga", obtendo: "Consultando YouTube", baixando: "Obtendo o vídeo na VPS", convertendo: "Convertendo para o iPad" };
+    status.textContent = (labels[data.status] || "Processando") + "… Aguarde; isso pode levar alguns minutos.";
+    setTimeout(function () {
+      backendRequest("/api/status/" + id, function (error, latest) {
+        if (error) { status.textContent = error; return; }
+        updateVideo(id, latest);
+      });
+    }, 3500);
   }
   function normalize(data, kind) {
     var input = (kind === "piped" || kind === "google") ? data && data.items : data;
@@ -255,6 +299,20 @@
     progress.className = "muted";
     var cards = document.createElement("div");
     results.appendChild(cards);
+    if (location.hostname && location.hostname !== "white13291.github.io") {
+      progress.textContent = "Buscando vídeos pela VPS…";
+      backendRequest("/api/search?q=" + encodeURIComponent(q), function (error, data) {
+        if (error) {
+          progress.textContent = error + ". Você também pode configurar a busca do YouTube.";
+          addPublicButton(results, progress, cards, q);
+          return;
+        }
+        var items = data && data.items ? data.items : [];
+        progress.textContent = items.length ? items.length + " vídeos encontrados. Toque para assistir." : "Nenhum vídeo encontrado.";
+        for (var k = 0; k < items.length; k++) videoCard(cards, items[k], q);
+      });
+      return;
+    }
     var key = getKey();
     if (!key) {
       progress.textContent = "Para usar a pesquisa oficial, configure sua chave da YouTube Data API v3 no topo da página.";

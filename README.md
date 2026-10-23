@@ -7,12 +7,31 @@ diretamente no navegador. **Nenhum vídeo é baixado ou convertido por nós.**
 Site público: https://white13291.github.io/RetroTube/
 
 O GitHub Pages é um servidor estático. Para mostrar resultados **dentro do
-RetroTube**, o JavaScript consulta APIs públicas de busca do Piped e do
-Invidious, que fornecem IDs, títulos e canais de vídeos do YouTube. Os cartões
-aparecem no próprio site e, ao tocar em um deles, o usuário vai para o player
-do RetroTube, sem precisar copiar links. A consulta é feita diretamente do
-navegador; não existe VPS ou backend próprio. O DuckDuckGo só é oferecido como
-busca alternativa caso as APIs públicas falhem.
+RetroTube**, a página aceita uma chave pessoal da **YouTube Data API v3**.
+A chave é salva no localStorage do navegador (ou apenas na memória durante
+a página atual quando o armazenamento está bloqueado), **nunca no código
+ou no GitHub**. As consultas
+são feitas diretamente ao Google, e os cartões apontam para o player do
+próprio RetroTube. Não é preciso VPS ou backend próprio.
+
+## Habilitar a busca oficial
+
+1. Entre no Google Cloud Console com sua conta Google e crie ou selecione um projeto.
+2. Em **APIs e serviços → Biblioteca**, ative **YouTube Data API v3**.
+3. Em **APIs e serviços → Credenciais**, crie uma chave de API.
+4. Restrinja a chave à **YouTube Data API v3** e, em restrições de aplicativo
+   (sites HTTP), ao domínio e caminho do RetroTube
+   (\`https://white13291.github.io/RetroTube/*\`).
+5. No RetroTube, toque em **Configurar busca do YouTube**, cole a chave
+   e salve. Faça uma pesquisa; os resultados devem aparecer dentro do site.
+
+Não envie a chave a terceiros nem a coloque no repositório. Para um segundo
+dispositivo, configure-a novamente no próprio navegador desse dispositivo.
+Consulte as cotas vigentes no Google Cloud. A documentação do YouTube de
+outubro de 2026 indica uma alocação padrão de 100 buscas \`search.list\` por dia.
+
+Como alternativa experimental, o usuário pode clicar em **Tentar busca
+pública**, que usa instâncias Piped/Invidious sujeitas a falhas e bloqueios.
 
 **Atenção:** o código do RetroTube funciona em JavaScript antigo, mas o player
 que vem do YouTube pode não funcionar no Safari do iOS 8.3. Teste no dispositivo.
@@ -56,9 +75,11 @@ YouTube e das permissões de incorporação do vídeo, não de uma API própria.
 ## Restrições importantes
 
 - O player do YouTube pode recusar a incorporação de alguns vídeos.
-- Os resultados aparecem dentro do RetroTube quando pelo menos uma API pública
-  responde e permite requisições de outros sites (CORS). Essas APIs são
-  mantidas por terceiros e podem ficar fora do ar.
+- A busca oficial requer uma chave da YouTube Data API v3 configurada pelo
+  próprio usuário; a compatibilidade com Safari antigo ainda depende da
+  conexão HTTPS, CORS e recursos do navegador.
+- A busca experimental sem chave usa serviços públicos de terceiros, que
+  podem ficar fora do ar.
 - Não há conversão nem download de arquivos MP4 pelo nosso servidor.
 - A interface usa apenas JavaScript ES5, mas a compatibilidade real com iOS 8.3 depende de teste no dispositivo e de um certificado HTTPS aceito pelo Safari.
 - Respeite os direitos dos criadores, as restrições de acesso ao conteúdo e os termos dos serviços utilizados.

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>RetroTube - Vídeos no Safari antigo</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f5f5f5;color:#252525;font:16px/1.45 Arial,Helvetica,sans-serif}
+    a{color:#b72129;text-decoration:none}.header{background:white;border-bottom:3px solid #d72a32;padding:12px}
+    .inner,.main{max-width:840px;margin:0 auto}.brand{font-size:25px;font-weight:bold;letter-spacing:-1px;color:#222;display:inline-block}
+    .logo{background:#d72a32;color:#fff;display:inline-block;border-radius:5px;padding:1px 8px;margin-right:5px}
+    .main{padding:20px 12px}.panel{background:white;border:1px solid #ddd;border-radius:5px;padding:17px;margin-bottom:14px}
+    h1{font-size:23px;margin:0 0 10px}h2{font-size:18px;margin:0 0 7px}
+    .search{margin-top:10px}.search input{padding:11px;border:1px solid #aaa;border-radius:3px;width:70%;font:16px Arial;background:#fff}
+    button{padding:11px 14px;background:#d72a32;color:white;border:0;border-radius:3px;font:16px Arial;cursor:pointer}
+    .muted{color:#666;font-size:14px}.notice{background:#fff5df;border-left:4px solid #eab34d;padding:10px 12px;margin:15px 0}
+    .item{padding:12px 0;border-bottom:1px solid #eee;min-height:110px;overflow:hidden}.item:last-child{border:0}
+    .thumb{float:left;width:155px;height:87px;background:#ddd;margin-right:15px;object-fit:cover}
+    .player{display:block;width:100%;max-width:810px;background:black;min-height:180px;margin:15px 0}
+    .hide{display:none}.footer{text-align:center;color:#888;font-size:13px;padding:20px}
+    @media(max-width:600px){.panel{padding:12px}.thumb{width:115px;height:65px;margin-right:10px}.item{min-height:90px}.item h2{font-size:16px}}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="inner">
+      <a href="./" class="brand"><span class="logo">&#9654;</span>RetroTube</a>
+      <form class="search" id="search-form" action="./" method="get">
+        <input id="search-query" type="text" name="q" required maxlength="90" placeholder="Buscar ou colar link" aria-label="Pesquisar vídeo">
+        <button type="submit">Buscar</button>
+      </form>
+    </div>
+  </div>
+  <div class="main">
+    <div id="message" class="panel">
+      <h1>Bem-vindo ao RetroTube</h1>
+      <p>Uma maneira simples de buscar vídeos em navegadores antigos, incluindo o Safari do iOS 8.3.</p>
+      <p class="notice">Os vídeos são preparados pelo nosso servidor em formato MP4. O primeiro carregamento pode demorar alguns minutos.</p>
+    </div>
+    <div id="results" class="panel hide"></div>
+    <div id="watch" class="panel hide">
+      <h1 id="video-title">Preparando vídeo…</h1>
+      <p id="video-status" class="muted">Aguardando servidor</p>
+      <video id="player" class="player hide" controls preload="metadata">
+        Seu navegador não suporta vídeo HTML5.
+      </video>
+      <p><a href="./">Voltar para a busca</a></p>
+    </div>
+    <div class="footer">Sem conta e sem login &bull; Interface leve &bull; iOS 8.3</div>
+  </div>
+  <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

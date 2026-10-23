@@ -15,13 +15,16 @@
     .main{padding:20px 12px}.panel{background:white;border:1px solid #ddd;border-radius:5px;padding:17px;margin-bottom:14px}
     h1{font-size:23px;margin:0 0 10px}h2{font-size:18px;margin:0 0 7px}
     .search{margin-top:10px}.search input{padding:11px;border:1px solid #aaa;border-radius:3px;width:70%;font:16px Arial;background:#fff}
+    .api-box{margin-top:14px;padding:12px;background:#fff7eb;border:1px solid #e6cfac;border-radius:5px}
+    .api-box input{padding:10px;width:66%;max-width:490px;font:16px Arial;border:1px solid #aaa;border-radius:3px;background:#fff}
+    .api-box button{font-size:14px}.api-box h2{margin:0 0 8px}
     button{padding:11px 14px;background:#d72a32;color:white;border:0;border-radius:3px;font:16px Arial;cursor:pointer}
     .muted{color:#666;font-size:14px}.notice{background:#fff5df;border-left:4px solid #eab34d;padding:10px 12px;margin:15px 0}
     .item{padding:12px 0;border-bottom:1px solid #eee;min-height:110px;overflow:hidden}.item:last-child{border:0}
     .thumb{float:left;width:155px;height:87px;background:#ddd;margin-right:15px;object-fit:cover}
     .player{display:block;width:100%;height:450px;max-width:810px;background:black;margin:15px 0;border:0}
     .hide{display:none}.footer{text-align:center;color:#888;font-size:13px;padding:20px}
-    @media(max-width:600px){.panel{padding:12px}.thumb{width:115px;height:65px;margin-right:10px}.item{min-height:90px}.item h2{font-size:16px}.player{height:225px}}
+    @media(max-width:600px){.panel{padding:12px}.thumb{width:115px;height:65px;margin-right:10px}.item{min-height:90px}.item h2{font-size:16px}.player{height:225px}.api-box input{width:100%;margin-bottom:8px}}
   </style>
 </head>
 <body>
@@ -31,15 +34,25 @@
       <form class="search" id="search-form" action="./" method="get">
         <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Pesquisar vídeos ou colar link" aria-label="Pesquisar vídeos">
         <button type="submit">Buscar vídeos</button>
-        <p class="muted"><a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca alternativa, caso a pesquisa interna falhe</a></p>
+        <p class="muted"><a id="api-settings-link" href="#api-settings">Configurar busca do YouTube</a> &bull; <a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca alternativa</a></p>
       </form>
+      <div id="api-settings" class="api-box hide">
+        <h2>Configurar pesquisa oficial do YouTube</h2>
+        <p class="muted">Insira sua chave da YouTube Data API v3. Ela fica somente neste navegador e não é enviada ao GitHub. Restrinja a chave à API do YouTube e ao endereço deste site no Google Cloud.</p>
+        <form id="api-key-form">
+          <input id="api-key-input" type="password" autocomplete="off" placeholder="Cole sua chave da API" aria-label="Chave pessoal da API do YouTube">
+          <button type="submit">Salvar chave</button>
+        </form>
+        <p id="api-key-status" class="muted"></p>
+        <p class="muted"><a id="api-key-clear" href="#">Remover chave deste navegador</a></p>
+      </div>
     </div>
   </div>
   <div class="main">
     <div id="message" class="panel">
       <h1>Bem-vindo ao RetroTube</h1>
       <p>Pesquise um assunto para ver vídeos aqui mesmo. Toque em um resultado para abri-lo no player do RetroTube. Você também pode colar um link do YouTube.</p>
-      <p class="notice">Sem VPS e sem conversão: a busca usa serviços públicos de pesquisa e o player vem diretamente do YouTube. A disponibilidade desses serviços e a reprodução no Safari do iOS 8.3 podem variar.</p>
+      <p class="notice">Sem VPS e sem conversão: use uma chave pessoal da API oficial do YouTube para pesquisar. A busca por serviços públicos continua como opção experimental. A reprodução no Safari do iOS 8.3 ainda depende do player do YouTube.</p>
     </div>
     <div id="results" class="panel hide"></div>
     <div id="watch" class="panel hide">
@@ -53,6 +66,6 @@
     <div class="footer">Sem conta e sem login no RetroTube &bull; Apenas GitHub Pages &bull; Interface leve</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

@@ -1,87 +1,53 @@
-# RetroTube — somente GitHub Pages
+# RetroTube — Safari iOS 8.3 com VPS
 
-Esta é a versão sem VPS do RetroTube. A página é feita em HTML, CSS e
-JavaScript ES5 e recebe links de vídeos do YouTube, carregando o player oficial
-diretamente no navegador. **Nenhum vídeo é baixado ou convertido por nós.**
+O RetroTube agora pode ser executado na VPS Ubuntu Server. Nesse modo, a VPS serve o site, pesquisa vídeos e tenta prepará-los como **MP4 (H.264 baseline + AAC)**. A conversão ocorre **na VPS**, e o iPad assiste pelo player nativo HTML5. Nenhum arquivo precisa ser baixado manualmente no iPad.
 
-Site público: https://white13291.github.io/RetroTube/
+> Solução experimental: o YouTube pode bloquear ferramentas de extração e a reprodução real precisa ser testada no dispositivo. Respeite os direitos e termos do serviço de origem.
 
-O GitHub Pages é um servidor estático. Para mostrar resultados **dentro do
-RetroTube**, a página aceita uma chave pessoal da **YouTube Data API v3**.
-A chave é salva no localStorage do navegador (ou apenas na memória durante
-a página atual quando o armazenamento está bloqueado), **nunca no código
-ou no GitHub**. As consultas
-são feitas diretamente ao Google, e os cartões apontam para o player do
-próprio RetroTube. Não é preciso VPS ou backend próprio.
+## Instalação no Ubuntu Server 22.04 ou 24.04
 
-## Habilitar a busca oficial
+Use VPS com no mínimo 2 GB de RAM (4 GB recomendado), 5 GB livres e porta TCP 8080 liberada no firewall do provedor. Em um terminal SSH **na VPS**:
 
-1. Entre no Google Cloud Console com sua conta Google e crie ou selecione um projeto.
-2. Em **APIs e serviços → Biblioteca**, ative **YouTube Data API v3**.
-3. Em **APIs e serviços → Credenciais**, crie uma chave de API.
-4. Restrinja a chave à **YouTube Data API v3** e, em restrições de aplicativo
-   (sites HTTP), à origem do RetroTube
-   (\`https://white13291.github.io/*\`). O navegador pode enviar apenas a
-   origem no cabeçalho Referer; restringir ao caminho \`/RetroTube/\` pode
-   causar erro 403.
-5. No RetroTube, toque em **Configurar busca do YouTube**, cole a chave
-   e salve. Faça uma pesquisa; os resultados devem aparecer dentro do site.
+```bash
+sudo apt-get update
+sudo apt-get install -y git
+git clone https://github.com/White13291/RetroTube.git
+cd RetroTube
+sudo bash install-vps.sh
+```
 
-Não envie a chave a terceiros nem a coloque no repositório. Para um segundo
-dispositivo, configure-a novamente no próprio navegador desse dispositivo.
-Consulte as cotas vigentes no Google Cloud. A documentação do YouTube de
-outubro de 2026 indica uma alocação padrão de 100 buscas \`search.list\` por dia.
+Ao concluir, abra **http://IP-DA-SUA-VPS:8080/** no Safari do iPad. Substitua `IP-DA-SUA-VPS` pelo IPv4 público exibido no painel da hospedagem.
 
-Como alternativa experimental, o usuário pode clicar em **Tentar busca
-pública**, que usa instâncias Piped/Invidious sujeitas a falhas e bloqueios.
+O GitHub Pages antigo continua no endereço de sempre; **para reproduzir vídeos, abra o endereço da VPS**.
 
-**Atenção:** o código do RetroTube funciona em JavaScript antigo, mas o player
-que vem do YouTube pode não funcionar no Safari do iOS 8.3. Teste no dispositivo.
+Se o repositório já estiver na VPS:
 
-## Arquivos antigos de servidor (não utilizados)
+```bash
+cd RetroTube
+git pull --ff-only
+sudo bash install-vps.sh
+```
 
-Os arquivos da pasta backend/, compose.yaml e frontend/config.js foram
-preservados como referência para uma possível versão futura com servidor.
-Eles **não são utilizados** pelo site publicado atualmente.
+## Se não abrir no iPad
 
-### Caso se queira usar a versão com VPS no futuro
+1. Na VPS, execute `curl http://127.0.0.1:8080/api/health`. A resposta deve conter `"ok":true`.
+2. Libere **TCP 8080** no painel do provedor e, se UFW estiver ativo, `sudo ufw allow 8080/tcp`.
+3. Confira os logs com `sudo docker compose logs --tail=80 retrotube` (ou `sudo docker-compose logs --tail=80 retrotube`).
+4. Se a porta 8080 estiver ocupada, use `sudo env RETROTUBE_PORT=8081 bash install-vps.sh` e libere a porta 8081.
+5. Se um vídeo falhar, veja os logs: o YouTube pode bloquear consultas provenientes de IPs de datacenters.
 
-É necessário Docker/Compose, um domínio (ou subdomínio) apontado para a VPS e HTTPS configurado em um proxy reverso.
+## Atualizar
 
-1. Coloque este repositório na VPS.
-2. Execute: docker compose up -d --build
-3. Em seu proxy HTTPS (Caddy, Nginx etc.), encaminhe o domínio da API para http://127.0.0.1:8765.
-4. Verifique https://SEU-DOMINIO-DA-API/api/health, que deve retornar ok:true.
-5. Ajuste frontend/config.js com o endereço https://SEU-DOMINIO-DA-API.
+```bash
+cd RetroTube
+git pull --ff-only
+sudo bash install-vps.sh
+```
 
-Exemplo de configuração do Caddy:
+## Segurança e limitações
 
-    videos.seudominio.com {
-        reverse_proxy 127.0.0.1:8765
-    }
-
-Não copie esse exemplo sem substituir o domínio e conferir os serviços existentes na VPS.
-
-## Publicar no GitHub Pages
-
-O repositório já contém `.github/workflows/pages.yml`, que publica a pasta
-`frontend/` pelo GitHub Actions. Em **Settings → Pages → Build and deployment**,
-escolha **GitHub Actions** e confirme que o repositório está público.
-O endereço do site é:
-
-https://white13291.github.io/RetroTube/
-
-O acesso ao RetroTube não exige conta. A reprodução depende do player do
-YouTube e das permissões de incorporação do vídeo, não de uma API própria.
-
-## Restrições importantes
-
-- O player do YouTube pode recusar a incorporação de alguns vídeos.
-- A busca oficial requer uma chave da YouTube Data API v3 configurada pelo
-  próprio usuário; a compatibilidade com Safari antigo ainda depende da
-  conexão HTTPS, CORS e recursos do navegador.
-- A busca experimental sem chave usa serviços públicos de terceiros, que
-  podem ficar fora do ar.
-- Não há conversão nem download de arquivos MP4 pelo nosso servidor.
-- A interface usa apenas JavaScript ES5, mas a compatibilidade real com iOS 8.3 depende de teste no dispositivo e de um certificado HTTPS aceito pelo Safari.
-- Respeite os direitos dos criadores, as restrições de acesso ao conteúdo e os termos dos serviços utilizados.
+- `http://IP:8080` evita incompatibilidade de certificados HTTPS com o Safari do iOS 8.3. **HTTP não é criptografado**: use em rede confiável e não digite informações privadas ou credenciais nesse endereço.
+- Sua chave da YouTube Data API v3 **não está no repositório**. A busca pela VPS não exige chave. Se usar a versão GitHub Pages, a chave permanece no navegador onde foi salva.
+- A API fica pública na porta 8080. Há limites básicos por IP e duração máxima de 30 minutos. O cache limita vídeos prontos a aproximadamente 3 GB, mas arquivos temporários podem consumir espaço adicional.
+- A VPS normalmente obtém e converte o vídeo antes de iniciar a reprodução (o iPad não precisa baixar arquivos manualmente). A entrega aceita HTTP Range/206.
+- Para HTTPS com domínio próprio, é necessário configurar separadamente um certificado compatível com o iPad.

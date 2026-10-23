@@ -99,7 +99,7 @@
     var thumb = document.createElement("img");
     thumb.className = "thumb";
     thumb.src = "https://i.ytimg.com/vi/" + video.id + "/mqdefault.jpg";
-    thumb.alt = "";
+    thumb.alt = "Assistir: " + video.title.slice(0, 100);
     thumb.width = 155;
     thumb.height = 87;
     thumb.loading = "lazy";

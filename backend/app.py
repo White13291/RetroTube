@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from flask import Flask, abort, jsonify, request, send_file
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 try:
     from yt_dlp import YoutubeDL
@@ -21,6 +21,7 @@ except ImportError:
     YoutubeDL = None
 
 app = Flask(__name__)
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 VIDEO_DIR = Path(os.getenv("RETROTUBE_CACHE_DIR", "/tmp/retrotube-cache")).resolve()
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 MAX_DURATION = int(os.getenv("RETROTUBE_MAX_DURATION", "1800"))
@@ -247,11 +248,14 @@ def thumbnail(identifier):
 
 @app.get("/")
 def home():
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'><title>RetroTube API</title></head>"
-        "<body><h1>RetroTube</h1><p>Servidor de vídeos ativo. Use a interface do GitHub Pages.</p>"
-        "<p><a href='/api/health'>Verificar estado do servidor</a></p></body></html>"
-    )
+    return send_from_directory(FRONTEND_DIR, "index.html")
+
+
+@app.get("/<path:filename>")
+def frontend_file(filename):
+    if filename not in ("app.js", "config.js", "logo.png", "logo.svg"):
+        abort(404)
+    return send_from_directory(FRONTEND_DIR, filename)
 
 
 if __name__ == "__main__":

@@ -6,9 +6,12 @@ diretamente no navegador. **Nenhum vídeo é baixado ou convertido por nós.**
 
 Site público: https://white13291.github.io/RetroTube/
 
-O GitHub Pages é um servidor estático. Sem uma API de busca externa, não há
-pesquisa automática pelo catálogo completo do YouTube; por isso o usuário deve
-colar um link ou ID. Uma pesquisa por texto oferece um link para o YouTube.
+O GitHub Pages é um servidor estático. Para que a busca funcione sem API ou
+servidor, o formulário envia consultas ao DuckDuckGo com os parâmetros
+ia=videos e iax=videos, abrindo os resultados na aba de vídeos.
+O link de busca leve usa DuckDuckGo Lite com o filtro site:youtube.com,
+mas apresenta resultados de páginas, não a interface específica de vídeos.
+Para assistir no RetroTube, é necessário colar o link ou ID do YouTube.
 
 **Atenção:** o código do RetroTube funciona em JavaScript antigo, mas o player
 que vem do YouTube pode não funcionar no Safari do iOS 8.3. Teste no dispositivo.
@@ -52,6 +55,7 @@ YouTube e das permissões de incorporação do vídeo, não de uma API própria.
 ## Restrições importantes
 
 - O player do YouTube pode recusar a incorporação de alguns vídeos.
-- Não há busca interna de vídeos nem conversão ou download de arquivos MP4 nesta versão.
+- Os resultados da busca são exibidos no DuckDuckGo, fora do RetroTube; não há
+  conversão nem download de arquivos MP4 pelo nosso servidor.
 - A interface usa apenas JavaScript ES5, mas a compatibilidade real com iOS 8.3 depende de teste no dispositivo e de um certificado HTTPS aceito pelo Safari.
 - Respeite os direitos dos criadores, as restrições de acesso ao conteúdo e os termos dos serviços utilizados.

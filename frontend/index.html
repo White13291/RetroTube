@@ -17,9 +17,9 @@
     .muted{color:#666;font-size:14px}.notice{background:#fff5df;border-left:4px solid #eab34d;padding:10px 12px;margin:15px 0}
     .item{padding:12px 0;border-bottom:1px solid #eee;min-height:110px;overflow:hidden}.item:last-child{border:0}
     .thumb{float:left;width:155px;height:87px;background:#ddd;margin-right:15px;object-fit:cover}
-    .player{display:block;width:100%;max-width:810px;background:black;min-height:180px;margin:15px 0}
+    .player{display:block;width:100%;height:450px;max-width:810px;background:black;margin:15px 0;border:0}
     .hide{display:none}.footer{text-align:center;color:#888;font-size:13px;padding:20px}
-    @media(max-width:600px){.panel{padding:12px}.thumb{width:115px;height:65px;margin-right:10px}.item{min-height:90px}.item h2{font-size:16px}}
+    @media(max-width:600px){.panel{padding:12px}.thumb{width:115px;height:65px;margin-right:10px}.item{min-height:90px}.item h2{font-size:16px}.player{height:225px}}
   </style>
 </head>
 <body>
@@ -27,30 +27,29 @@
     <div class="inner">
       <a href="./" class="brand"><span class="logo">&#9654;</span>RetroTube</a>
       <form class="search" id="search-form" action="./" method="get">
-        <input id="search-query" type="text" name="q" required maxlength="90" placeholder="Buscar ou colar link" aria-label="Pesquisar vídeo">
-        <button type="submit">Buscar</button>
+        <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Cole o link ou ID de um vídeo do YouTube" aria-label="Link do vídeo">
+        <button type="submit">Abrir</button>
       </form>
     </div>
   </div>
   <div class="main">
     <div id="message" class="panel">
       <h1>Bem-vindo ao RetroTube</h1>
-      <p>Uma maneira simples de buscar vídeos em navegadores antigos, incluindo o Safari do iOS 8.3.</p>
-      <p class="notice">Os vídeos são preparados pelo nosso servidor em formato MP4. O primeiro carregamento pode demorar alguns minutos.</p>
+      <p>Cole o link de um vídeo do YouTube no campo acima para tentar reproduzi-lo aqui.</p>
+      <p class="notice">Esta versão funciona apenas com GitHub Pages, sem servidor e sem conversão de vídeos. O player vem diretamente do YouTube e pode não funcionar no Safari do iOS 8.3.</p>
     </div>
     <div id="results" class="panel hide"></div>
     <div id="watch" class="panel hide">
-      <h1 id="video-title">Preparando vídeo…</h1>
-      <p id="video-status" class="muted">Aguardando servidor</p>
-      <video id="player" class="player hide" controls preload="metadata">
-        Seu navegador não suporta vídeo HTML5.
-      </video>
+      <h1 id="video-title">Abrindo vídeo…</h1>
+      <p id="video-status" class="muted"></p>
+      <iframe id="player" class="player" title="Player do YouTube" allowfullscreen webkitallowfullscreen></iframe>
+      <p><a id="alternate-player" href="#">Tentar player alternativo</a> &bull; <a id="youtube-link" href="#">Abrir diretamente no YouTube</a></p>
+      <p class="muted">O player é fornecido pelo YouTube. Alguns vídeos não permitem incorporação, e o Safari antigo pode não ser compatível.</p>
       <p><a href="./">Voltar para a busca</a></p>
     </div>
-    <div class="footer">Sem conta e sem login &bull; Interface leve &bull; iOS 8.3</div>
+    <div class="footer">Sem conta e sem login no RetroTube &bull; Apenas GitHub Pages &bull; Interface leve</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

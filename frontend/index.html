@@ -26,17 +26,20 @@
   <div class="header">
     <div class="inner">
       <a href="./" class="brand"><span class="logo">&#9654;</span>RetroTube</a>
-      <form class="search" id="search-form" action="./" method="get">
-        <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Cole o link ou ID de um vídeo do YouTube" aria-label="Link do vídeo">
-        <button type="submit">Abrir</button>
+      <form class="search" id="search-form" action="https://duckduckgo.com/" method="get">
+        <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Pesquisar vídeos ou colar link" aria-label="Pesquisar vídeos">
+        <input type="hidden" name="ia" value="videos">
+        <input type="hidden" name="iax" value="videos">
+        <button type="submit">Buscar vídeos</button>
+        <p class="muted"><a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca leve: links do YouTube</a></p>
       </form>
     </div>
   </div>
   <div class="main">
     <div id="message" class="panel">
       <h1>Bem-vindo ao RetroTube</h1>
-      <p>Cole o link de um vídeo do YouTube no campo acima para tentar reproduzi-lo aqui.</p>
-      <p class="notice">Esta versão funciona apenas com GitHub Pages, sem servidor e sem conversão de vídeos. O player vem diretamente do YouTube e pode não funcionar no Safari do iOS 8.3.</p>
+      <p>Digite um assunto para pesquisar no DuckDuckGo, diretamente na aba de vídeos. Para reproduzir aqui, cole um link do YouTube.</p>
+      <p class="notice">Sem VPS e sem conversão: os resultados de pesquisa abrem no DuckDuckGo, e o player vem diretamente do YouTube. Sites externos podem exigir um navegador mais recente que o Safari do iOS 8.3.</p>
     </div>
     <div id="results" class="panel hide"></div>
     <div id="watch" class="panel hide">

@@ -1,4 +1,4 @@
-/* JavaScript ES5 para Safari antigo. Busca por APIs publicas, sem servidor nosso. */
+/* JavaScript ES5 para Safari antigo. YouTube Data API no navegador, sem servidor. */
 (function () {
   "use strict";
   var message = document.getElementById("message");
@@ -8,6 +8,11 @@
   var player = document.getElementById("player");
   var status = document.getElementById("video-status");
   var title = document.getElementById("video-title");
+  var keyPanel = document.getElementById("api-settings");
+  var keyInput = document.getElementById("api-key-input");
+  var keyStatus = document.getElementById("api-key-status");
+  var memoryKey = "";
+  var keyName = "retrotube_youtube_api_key";
   var searchSources = [
     { url: "https://pipedapi.kavin.rocks/search?q=", tail: "&filter=videos", kind: "piped" },
     { url: "https://inv.nadeko.net/api/v1/search?q=", tail: "&type=video", kind: "invidious" },
@@ -19,6 +24,25 @@
 
   function valid(id) {
     return /^[A-Za-z0-9_-]{11}$/.test(id || "");
+  }
+  function getKey() {
+    if (memoryKey) return memoryKey;
+    try { return localStorage.getItem(keyName) || ""; }
+    catch (error) { return ""; }
+  }
+  function saveKey(value) {
+    memoryKey = value;
+    try { localStorage.setItem(keyName, value); return true; }
+    catch (error) { return false; }
+  }
+  function clearKey() {
+    memoryKey = "";
+    try { localStorage.removeItem(keyName); } catch (ignore) {}
+  }
+  function openKeySettings() {
+    keyPanel.className = "api-box";
+    keyStatus.textContent = getKey() ? "Uma chave já está configurada neste navegador." : "Configure sua chave para pesquisar.";
+    keyInput.focus();
   }
   function param(name) {
     var match = new RegExp("[?&]" + name + "=([^&]*)").exec(location.search);
@@ -64,10 +88,10 @@
     };
   }
   function normalize(data, kind) {
-    var input = kind === "piped" ? data && data.items : data;
+    var input = (kind === "piped" || kind === "google") ? data && data.items : data;
     var output = [];
     var seen = {};
-    var i, entry, id, match;
+    var i, entry, id, match, name, channel;
     if (!input || Object.prototype.toString.call(input) !== "[object Array]") return output;
     for (i = 0; i < input.length && output.length < 24; i++) {
       entry = input[i];
@@ -76,16 +100,24 @@
         if (entry.type && entry.type !== "stream") continue;
         match = /[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/.exec(entry.url || "");
         id = match ? match[1] : "";
+        name = entry.title;
+        channel = entry.uploaderName;
+      } else if (kind === "google") {
+        id = entry.id && entry.id.videoId;
+        name = entry.snippet && entry.snippet.title;
+        channel = entry.snippet && entry.snippet.channelTitle;
       } else {
         if (entry.type && entry.type !== "video" && entry.type !== "shortVideo") continue;
         id = entry.videoId;
+        name = entry.title;
+        channel = entry.author;
       }
-      if (!valid(id) || seen[id] || !entry.title) continue;
+      if (!valid(id) || seen[id] || !name) continue;
       seen[id] = true;
       output.push({
         id: id,
-        title: String(entry.title),
-        channel: String(entry.uploaderName || entry.author || "YouTube")
+        title: String(name),
+        channel: String(channel || "YouTube")
       });
     }
     return output;
@@ -137,25 +169,49 @@
       xhr.send(null);
     } catch (error) { finish(null); }
   }
-  function showSearch(q) {
-    message.className = "hide";
-    watch.className = "hide";
-    results.className = "panel";
-    query.value = q;
-    results.innerHTML = "";
-    textNode(results, "h1", "Resultados para: " + q);
-    var progress = textNode(results, "p", "Buscando vídeos…");
-    progress.className = "muted";
-    var cards = document.createElement("div");
-    results.appendChild(cards);
+  function requestGoogle(q, key, callback) {
+    var xhr = new XMLHttpRequest();
+    var finished = false;
+    var timer = setTimeout(function () {
+      finish(null, "A busca demorou demais. Verifique sua conexão e tente novamente.");
+      try { xhr.abort(); } catch (ignore) {}
+    }, 12000);
+    function finish(items, error) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      callback(items, error);
+    }
+    var url = "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video" +
+      "&maxResults=24&videoEmbeddable=true&q=" + encodeURIComponent(q) +
+      "&key=" + encodeURIComponent(key);
+    try {
+      xhr.open("GET", url, true);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4) return;
+        if (xhr.status === 200) {
+          try { finish(normalize(JSON.parse(xhr.responseText), "google"), ""); }
+          catch (error) { finish(null, "A resposta do YouTube não pôde ser lida."); }
+        } else if (xhr.status === 400) {
+          finish(null, "O Google recusou a chave ou a solicitação. Confira se ela está correta.");
+        } else if (xhr.status === 403) {
+          finish(null, "O Google bloqueou a solicitação: ative a YouTube Data API v3, confira as restrições da chave e a cota diária.");
+        } else {
+          finish(null, "Não foi possível consultar a API do Google neste navegador.");
+        }
+      };
+      xhr.onerror = function () { finish(null, "Falha de conexão com a API do Google."); };
+      xhr.send(null);
+    } catch (error) { finish(null, "O Safari não conseguiu abrir a conexão com a API."); }
+  }
+  function searchWithPublicSources(q, progress, cards) {
+    progress.textContent = "Tentando serviços públicos de busca…";
     var next = 0;
     var success = false;
     function batch() {
       if (success) return;
       if (next >= searchSources.length) {
-        progress.textContent = "Não foi possível carregar resultados agora. Os serviços públicos de pesquisa podem estar indisponíveis ou ser incompatíveis com este Safari.";
-        var external = textNode(results, "a", "Tentar pesquisa alternativa");
-        external.href = "https://duckduckgo.com/?q=" + encodeURIComponent(q) + "&ia=videos&iax=videos";
+        progress.textContent = "Os serviços públicos não retornaram resultados. Configure uma chave oficial do YouTube para pesquisar com mais confiabilidade.";
         return;
       }
       var start = next;
@@ -180,12 +236,100 @@
     }
     batch();
   }
-  document.getElementById("search-form").onsubmit = function (event) {
-    var id = getId(query.value);
-    if (!id) return true;
+  function addPublicButton(parent, progress, cards, q) {
+    var button = textNode(parent, "button", "Tentar busca pública (experimental)");
+    button.type = "button";
+    button.onclick = function () {
+      button.className = "hide";
+      searchWithPublicSources(q, progress, cards);
+    };
+  }
+  function showSearch(q) {
+    message.className = "hide";
+    watch.className = "hide";
+    results.className = "panel";
+    query.value = q;
+    results.innerHTML = "";
+    textNode(results, "h1", "Resultados para: " + q);
+    var progress = textNode(results, "p", "Preparando pesquisa…");
+    progress.className = "muted";
+    var cards = document.createElement("div");
+    results.appendChild(cards);
+    var key = getKey();
+    if (!key) {
+      progress.textContent = "Para usar a pesquisa oficial, configure sua chave da YouTube Data API v3 no topo da página.";
+      var setup = textNode(results, "button", "Configurar chave do YouTube");
+      setup.type = "button";
+      setup.onclick = openKeySettings;
+      textNode(results, "p", " ");
+      addPublicButton(results, progress, cards, q);
+      return;
+    }
+    progress.textContent = "Buscando vídeos no YouTube…";
+    requestGoogle(q, key, function (items, error) {
+      if (error) {
+        progress.textContent = error;
+        var change = textNode(results, "button", "Verificar ou trocar chave");
+        change.type = "button";
+        change.onclick = openKeySettings;
+        textNode(results, "p", " ");
+        addPublicButton(results, progress, cards, q);
+      } else if (!items || !items.length) {
+        progress.textContent = "Nenhum vídeo encontrado para essa pesquisa.";
+      } else {
+        progress.textContent = items.length + " vídeos encontrados. Toque para assistir no RetroTube.";
+        var i;
+        for (i = 0; i < items.length; i++) videoCard(cards, items[i], q);
+      }
+    });
+  }
+  document.getElementById("api-settings-link").onclick = function (event) {
     if (event && event.preventDefault) event.preventDefault();
     if (event) event.returnValue = false;
-    location.href = "?v=" + encodeURIComponent(id);
+    if (keyPanel.className === "api-box") keyPanel.className = "api-box hide";
+    else openKeySettings();
+    return false;
+  };
+  document.getElementById("api-key-form").onsubmit = function (event) {
+    if (event && event.preventDefault) event.preventDefault();
+    if (event) event.returnValue = false;
+    var key = String(keyInput.value || "").replace(/^\s+|\s+$/g, "");
+    if (!/^[A-Za-z0-9_-]{20,}$/.test(key)) {
+      keyStatus.textContent = "A chave parece inválida. Confira o valor no Google Cloud.";
+      return false;
+    }
+    var persisted = saveKey(key);
+    keyInput.value = "";
+    keyStatus.textContent = persisted ? "Chave salva somente neste navegador." :
+      "Chave guardada apenas nesta sessão; o Safari bloqueou o armazenamento local.";
+    var q = param("q").slice(0, 150);
+    if (q && !getId(q)) showSearch(q);
+    return false;
+  };
+  document.getElementById("api-key-clear").onclick = function (event) {
+    if (event && event.preventDefault) event.preventDefault();
+    if (event) event.returnValue = false;
+    clearKey();
+    keyInput.value = "";
+    keyStatus.textContent = "Chave removida deste navegador.";
+    return false;
+  };
+  document.getElementById("search-form").onsubmit = function (event) {
+    var id = getId(query.value);
+    if (event && event.preventDefault) event.preventDefault();
+    if (event) event.returnValue = false;
+    if (id) {
+      location.href = "?v=" + encodeURIComponent(id);
+      return false;
+    }
+    var q = String(query.value || "").replace(/^\s+|\s+$/g, "").slice(0, 150);
+    if (!q) return false;
+    try {
+      if (typeof history !== "undefined" && history.pushState) {
+        history.pushState(null, "", "?q=" + encodeURIComponent(q));
+      }
+    } catch (ignore) {}
+    showSearch(q);
     return false;
   };
   document.getElementById("lite-search").onclick = function (event) {

@@ -1,18 +1,20 @@
 services:
   retrotube:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8765:8765"
+      - "${RETROTUBE_PORT:-8080}:8765"
     environment:
       RETROTUBE_CACHE_DIR: /data
       RETROTUBE_FRONTEND_ORIGIN: https://white13291.github.io
       RETROTUBE_MAX_DURATION: "1800"
-      RETROTUBE_MAX_ACTIVE_JOBS: "2"
-      RETROTUBE_MAX_QUEUE: "8"
+      RETROTUBE_MAX_ACTIVE_JOBS: "1"
+      RETROTUBE_MAX_QUEUE: "4"
       RETROTUBE_MAX_CACHE_GB: "3"
     volumes:
       - retrotube-cache:/data
-    mem_limit: 768m
+    mem_limit: 1536m
 volumes:
   retrotube-cache:

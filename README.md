@@ -30,9 +30,9 @@ Não copie esse exemplo sem substituir o domínio e conferir os serviços existe
 O repositório já contém `.github/workflows/pages.yml`, que publica a pasta
 `frontend/` pelo GitHub Actions. Em **Settings → Pages → Build and deployment**,
 escolha **GitHub Actions** e confirme que o repositório está público.
-O endereço ficará no formato:
+O endereço previsto para este repositório, após a publicação, é:
 
-https://white13291.github.io/NOME-DO-REPOSITORIO/
+https://white13291.github.io/RetroTube/
 
 O site será aberto sem login, mas a reprodução só funcionará depois que a API da VPS estiver acessível em HTTPS.
 

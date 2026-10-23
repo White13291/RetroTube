@@ -60,12 +60,12 @@
     query.value = q;
     results.innerHTML = "";
     textNode(results, "h1", "Busca de vídeos");
-    textNode(results, "p", "Somente com GitHub Pages não é possível pesquisar automaticamente todos os vídeos do YouTube. Encontre o vídeo no YouTube e cole o link aqui.");
-    var link = textNode(results, "a", "Pesquisar no YouTube por: " + q);
-    link.href = "https://www.youtube.com/results?search_query=" + encodeURIComponent(q);
+    textNode(results, "p", "Pesquise vídeos no DuckDuckGo. Para reproduzir um vídeo aqui, copie o link do YouTube e cole no campo acima.");
+    var link = textNode(results, "a", "Ver vídeos encontrados para: " + q);
+    link.href = "https://duckduckgo.com/?q=" + encodeURIComponent(q) + "&ia=videos&iax=videos";
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    textNode(results, "p", "A pesquisa do YouTube pode exigir um navegador mais recente.");
+    textNode(results, "p", "Se a página de vídeos não abrir no Safari antigo, use a busca leve no topo.");
   }
   document.getElementById("search-form").onsubmit = function (event) {
     var id = getId(query.value);
@@ -73,6 +73,15 @@
     if (event && event.preventDefault) event.preventDefault();
     if (event) event.returnValue = false;
     location.href = "?v=" + encodeURIComponent(id);
+    return false;
+  };
+  document.getElementById("lite-search").onclick = function (event) {
+    if (event && event.preventDefault) event.preventDefault();
+    if (event) event.returnValue = false;
+    var term = query.value.replace(/^\s+|\s+$/g, "");
+    if (!term) { query.focus(); return false; }
+    location.href = "https://lite.duckduckgo.com/lite/?q=" +
+      encodeURIComponent(term + " site:youtube.com");
     return false;
   };
   var id = param("v");

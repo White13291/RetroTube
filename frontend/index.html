@@ -26,20 +26,18 @@
   <div class="header">
     <div class="inner">
       <a href="./" class="brand"><span class="logo">&#9654;</span>RetroTube</a>
-      <form class="search" id="search-form" action="https://duckduckgo.com/" method="get">
+      <form class="search" id="search-form" action="./" method="get">
         <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Pesquisar vídeos ou colar link" aria-label="Pesquisar vídeos">
-        <input type="hidden" name="ia" value="videos">
-        <input type="hidden" name="iax" value="videos">
         <button type="submit">Buscar vídeos</button>
-        <p class="muted"><a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca leve: links do YouTube</a></p>
+        <p class="muted"><a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca alternativa, caso a pesquisa interna falhe</a></p>
       </form>
     </div>
   </div>
   <div class="main">
     <div id="message" class="panel">
       <h1>Bem-vindo ao RetroTube</h1>
-      <p>Digite um assunto para pesquisar no DuckDuckGo, diretamente na aba de vídeos. Para reproduzir aqui, cole um link do YouTube.</p>
-      <p class="notice">Sem VPS e sem conversão: os resultados de pesquisa abrem no DuckDuckGo, e o player vem diretamente do YouTube. Sites externos podem exigir um navegador mais recente que o Safari do iOS 8.3.</p>
+      <p>Pesquise um assunto para ver vídeos aqui mesmo. Toque em um resultado para abri-lo no player do RetroTube. Você também pode colar um link do YouTube.</p>
+      <p class="notice">Sem VPS e sem conversão: a busca usa serviços públicos de pesquisa e o player vem diretamente do YouTube. A disponibilidade desses serviços e a reprodução no Safari do iOS 8.3 podem variar.</p>
     </div>
     <div id="results" class="panel hide"></div>
     <div id="watch" class="panel hide">
@@ -48,7 +46,7 @@
       <iframe id="player" class="player" title="Player do YouTube" allowfullscreen webkitallowfullscreen></iframe>
       <p><a id="alternate-player" href="#">Tentar player alternativo</a> &bull; <a id="youtube-link" href="#">Abrir diretamente no YouTube</a></p>
       <p class="muted">O player é fornecido pelo YouTube. Alguns vídeos não permitem incorporação, e o Safari antigo pode não ser compatível.</p>
-      <p><a href="./">Voltar para a busca</a></p>
+      <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
     <div class="footer">Sem conta e sem login no RetroTube &bull; Apenas GitHub Pages &bull; Interface leve</div>
   </div>

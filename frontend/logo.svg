@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">RetroTube: televisão retrô com botão de reproduzir</title>
+  <defs>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ee4d4f"/>
+      <stop offset="0.48" stop-color="#d92e38"/>
+      <stop offset="1" stop-color="#a91229"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#421628"/>
+      <stop offset="1" stop-color="#752037"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#red)"/>
+  <path d="M58 36h140" stroke="#ffaca4" stroke-opacity=".38" stroke-width="7" stroke-linecap="round"/>
+  <rect x="31" y="42" width="194" height="153" rx="29" fill="#fff0d8"/>
+  <rect x="42" y="53" width="172" height="131" rx="22" fill="url(#screen)"/>
+  <path d="M99 79c0-3 4-5 7-3l66 40c4 2 4 7 0 10l-66 40c-3 2-7 0-7-3z" fill="#fff2de"/>
+  <path d="M52 65a13 13 0 0 1 13-13h100" stroke="#fff" stroke-opacity=".17" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <circle cx="174" cy="218" r="8" fill="#fff0d8"/>
+  <circle cx="198" cy="218" r="8" fill="#fff0d8"/>
+  <rect x="51" y="214" width="91" height="8" rx="4" fill="#fff0d8" fill-opacity=".76"/>
+</svg>

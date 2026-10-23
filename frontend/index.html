@@ -4,12 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="apple-touch-icon" href="logo.png">
   <title>RetroTube - Vídeos no Safari antigo</title>
   <style>
     *{box-sizing:border-box}body{margin:0;background:#f5f5f5;color:#252525;font:16px/1.45 Arial,Helvetica,sans-serif}
     a{color:#b72129;text-decoration:none}.header{background:white;border-bottom:3px solid #d72a32;padding:12px}
     .inner,.main{max-width:840px;margin:0 auto}.brand{font-size:25px;font-weight:bold;letter-spacing:-1px;color:#222;display:inline-block}
-    .logo{background:#d72a32;color:#fff;display:inline-block;border-radius:5px;padding:1px 8px;margin-right:5px}
+    .logo{display:inline-block;width:37px;height:37px;margin-right:8px;vertical-align:middle;border-radius:8px}
     .main{padding:20px 12px}.panel{background:white;border:1px solid #ddd;border-radius:5px;padding:17px;margin-bottom:14px}
     h1{font-size:23px;margin:0 0 10px}h2{font-size:18px;margin:0 0 7px}
     .search{margin-top:10px}.search input{padding:11px;border:1px solid #aaa;border-radius:3px;width:70%;font:16px Arial;background:#fff}
@@ -25,7 +27,7 @@
 <body>
   <div class="header">
     <div class="inner">
-      <a href="./" class="brand"><span class="logo">&#9654;</span>RetroTube</a>
+      <a href="./" class="brand"><img class="logo" src="logo.png" alt="">RetroTube</a>
       <form class="search" id="search-form" action="./" method="get">
         <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Pesquisar vídeos ou colar link" aria-label="Pesquisar vídeos">
         <button type="submit">Buscar vídeos</button>

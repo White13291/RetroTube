@@ -1,13 +1,25 @@
-# RetroTube — Safari iOS 8.3
+# RetroTube — somente GitHub Pages
 
-Interface simples de pesquisa e reprodução de vídeos, separada em duas partes:
+Esta é a versão sem VPS do RetroTube. A página é feita em HTML, CSS e
+JavaScript ES5 e recebe links de vídeos do YouTube, carregando o player oficial
+diretamente no navegador. **Nenhum vídeo é baixado ou convertido por nós.**
 
-- frontend/: HTML, CSS e JavaScript ES5 para publicar gratuitamente no GitHub Pages.
-- backend/: Flask + yt-dlp + FFmpeg, executado em uma VPS Ubuntu. Obtém e converte vídeos em MP4 H.264 baseline + AAC.
+Site público: https://white13291.github.io/RetroTube/
 
-O GitHub Pages não executa o backend. O arquivo frontend/config.js precisa apontar para um servidor próprio acessível em HTTPS.
+O GitHub Pages é um servidor estático. Sem uma API de busca externa, não há
+pesquisa automática pelo catálogo completo do YouTube; por isso o usuário deve
+colar um link ou ID. Uma pesquisa por texto oferece um link para o YouTube.
 
-## Preparar a VPS
+**Atenção:** o código do RetroTube funciona em JavaScript antigo, mas o player
+que vem do YouTube pode não funcionar no Safari do iOS 8.3. Teste no dispositivo.
+
+## Arquivos antigos de servidor (não utilizados)
+
+Os arquivos da pasta backend/, compose.yaml e frontend/config.js foram
+preservados como referência para uma possível versão futura com servidor.
+Eles **não são utilizados** pelo site publicado atualmente.
+
+### Caso se queira usar a versão com VPS no futuro
 
 É necessário Docker/Compose, um domínio (ou subdomínio) apontado para a VPS e HTTPS configurado em um proxy reverso.
 
@@ -30,16 +42,16 @@ Não copie esse exemplo sem substituir o domínio e conferir os serviços existe
 O repositório já contém `.github/workflows/pages.yml`, que publica a pasta
 `frontend/` pelo GitHub Actions. Em **Settings → Pages → Build and deployment**,
 escolha **GitHub Actions** e confirme que o repositório está público.
-O endereço previsto para este repositório, após a publicação, é:
+O endereço do site é:
 
 https://white13291.github.io/RetroTube/
 
-O site será aberto sem login, mas a reprodução só funcionará depois que a API da VPS estiver acessível em HTTPS.
+O acesso ao RetroTube não exige conta. A reprodução depende do player do
+YouTube e das permissões de incorporação do vídeo, não de uma API própria.
 
 ## Restrições importantes
 
-- O YouTube pode restringir requisições de servidores de datacenter. O yt-dlp deve ser atualizado, e não há garantia de que todos os vídeos funcionarão.
-- O backend limita vídeos a 30 minutos, duas conversões simultâneas e cache de 3 GB por padrão.
-- O primeiro acesso a cada vídeo pode levar tempo para baixar e converter; reproduções seguintes usam cache.
+- O player do YouTube pode recusar a incorporação de alguns vídeos.
+- Não há busca interna de vídeos nem conversão ou download de arquivos MP4 nesta versão.
 - A interface usa apenas JavaScript ES5, mas a compatibilidade real com iOS 8.3 depende de teste no dispositivo e de um certificado HTTPS aceito pelo Safari.
 - Respeite os direitos dos criadores, as restrições de acesso ao conteúdo e os termos dos serviços utilizados.

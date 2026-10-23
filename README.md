@@ -20,8 +20,10 @@ próprio RetroTube. Não é preciso VPS ou backend próprio.
 2. Em **APIs e serviços → Biblioteca**, ative **YouTube Data API v3**.
 3. Em **APIs e serviços → Credenciais**, crie uma chave de API.
 4. Restrinja a chave à **YouTube Data API v3** e, em restrições de aplicativo
-   (sites HTTP), ao domínio e caminho do RetroTube
-   (\`https://white13291.github.io/RetroTube/*\`).
+   (sites HTTP), à origem do RetroTube
+   (\`https://white13291.github.io/*\`). O navegador pode enviar apenas a
+   origem no cabeçalho Referer; restringir ao caminho \`/RetroTube/\` pode
+   causar erro 403.
 5. No RetroTube, toque em **Configurar busca do YouTube**, cole a chave
    e salve. Faça uma pesquisa; os resultados devem aparecer dentro do site.
 

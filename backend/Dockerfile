@@ -6,7 +6,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app.py .
 COPY frontend/ /frontend/
-RUN mkdir -p /data && useradd -r -u 10001 video && chown -R video:video /data /app
-USER video
+RUN mkdir -p /data && chown -R 10001:10001 /data /app
+USER 10001:10001
 EXPOSE 8765
 CMD ["gunicorn", "-w", "1", "--threads", "8", "-b", "0.0.0.0:8765", "--timeout", "120", "app:app"]

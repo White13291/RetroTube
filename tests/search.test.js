@@ -122,3 +122,9 @@ run("?demo=1", {}, function (demoNodes) {
   assert.equal(demoNodes.watch.className, "panel");
   console.log("OK: modo de teste sem YouTube");
 });
+
+run("?q=" + encodeURIComponent("https://inv.nadeko.net/watch?v=eWNhOwEIdRk"), {}, function (nodes) {
+  assert.equal(nodes.watch.className, "panel");
+  assert.equal(nodes["youtube-link"].href, "https://m.youtube.com/watch?v=eWNhOwEIdRk");
+  console.log("OK: links Invidious são aceitos no player do RetroTube");
+});

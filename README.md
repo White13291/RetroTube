@@ -2,6 +2,8 @@
 
 O RetroTube agora pode ser executado na VPS Ubuntu Server. Nesse modo, a VPS serve o site, pesquisa vídeos e tenta prepará-los como **MP4 (H.264 baseline + AAC)**. A conversão ocorre **na VPS**, e o iPad assiste pelo player nativo HTML5. Nenhum arquivo precisa ser baixado manualmente no iPad.
 
+Se o YouTube solicitar confirmação de robô à Oracle, o backend **tenta automaticamente provedores públicos do Piped** para busca e obtenção de um MP4 progressivo. É um fallback experimental: esses provedores são de terceiros, podem ficar indisponíveis e não há garantia de que disponibilizem todos os vídeos. Não é preciso criar uma conta nem colocar cookies do Google no servidor.
+
 > Solução experimental: o YouTube pode bloquear ferramentas de extração e a reprodução real precisa ser testada no dispositivo. Respeite os direitos e termos do serviço de origem.
 
 ## Instalação no Ubuntu Server 22.04 ou 24.04
@@ -37,6 +39,7 @@ sudo bash install-vps.sh
 3. Confira os logs com `sudo docker compose logs --tail=80 retrotube` (ou `sudo docker-compose logs --tail=80 retrotube`).
 4. Se a porta 8080 estiver ocupada, use `sudo env RETROTUBE_PORT=8081 bash install-vps.sh` e libere a porta 8081.
 5. Se um vídeo falhar, veja os logs: o YouTube pode bloquear consultas provenientes de IPs de datacenters.
+6. Se a mensagem disser que as fontes alternativas estão indisponíveis, tente novamente em outro momento. O fallback Piped depende da disponibilidade de servidores públicos que não controlamos.
 
 ## Atualizar
 

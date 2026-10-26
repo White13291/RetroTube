@@ -6,7 +6,7 @@ var path = require("path");
 var source = fs.readFileSync(path.join(__dirname, "../frontend/app.js"), "utf8");
 
 function element(tag) {
-  return {
+  var node = {
     tagName: tag || "",
     children: [],
     className: "",
@@ -17,6 +17,11 @@ function element(tag) {
     focus: function () {},
     setAttribute: function (name, value) { this[name] = value; }
   };
+  Object.defineProperty(node, "innerHTML", {
+    get: function () { return ""; },
+    set: function () { this.children = []; }
+  });
+  return node;
 }
 function descendants(node, tag) {
   var all = [];
@@ -30,7 +35,7 @@ function descendants(node, tag) {
 function run(search, responses, done, hostname, storage) {
   var nodes = {};
   var ids = ["message", "results", "watch", "search-query", "player",
-    "related", "related-status", "related-cards",
+    "related", "related-status", "related-cards", "quality-picker", "quality-select",
     "search-source",
     "video-status", "video-title", "youtube-link", "alternate-player",
     "lite-search", "search-form", "back-to-search", "api-settings",
@@ -57,9 +62,12 @@ function run(search, responses, done, hostname, storage) {
   FakeXHR.prototype.send = function () {
     var self = this;
     setTimeout(function () {
-      var kind = self.url.indexOf("/api/search?") === 0 ? "backend" :
+      var kind = self.url.indexOf("/api/qualities/") === 0 ? "qualities" :
+        (self.url.indexOf("/api/prepare/") === 0 ? "prepare" :
+        (self.url.indexOf("/api/status/") === 0 ? "status" :
+        (self.url.indexOf("/api/search?") === 0 ? "backend" :
         (self.url.indexOf("www.googleapis.com/youtube/v3/search") !== -1 ?
-        "google" : (self.url.indexOf("/api/v1/search?q=") !== -1 ? "invidious" : "piped"));
+        "google" : (self.url.indexOf("/api/v1/search?q=") !== -1 ? "invidious" : "piped")))));
       var response = responses[kind];
       self.readyState = 4;
       self.status = response ? 200 : 500;
@@ -96,6 +104,26 @@ run("", {}, function (nodes) {
     console.log("OK: temas claro e escuro persistem após navegar");
   }, "137.131.147.37", nodes.saved);
 });
+
+run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil", {
+  qualities: {qualities: [360, 720]},
+  prepare: {status: "pronto"},
+  backend: {items: []}
+}, function (nodes) {
+  var selector = nodes["quality-select"];
+  assert.equal(selector.disabled, false);
+  assert.equal(selector.children.length, 2);
+  assert.equal(selector.children[0].value, "360");
+  assert.equal(selector.children[1].value, "720");
+  assert(nodes.player.src.indexOf("?quality=360") !== -1);
+  selector.value = "720";
+  selector.onchange();
+  setTimeout(function () {
+    assert(nodes.player.src.indexOf("?quality=720") !== -1);
+    assert(nodes["video-status"].textContent.indexOf("720p") !== -1);
+    console.log("OK: somente resoluções verificadas e troca real de vídeo");
+  }, 20);
+}, "137.131.147.37");
 
 run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil&source=peertube&t=Hino", {
   backend: {items: [

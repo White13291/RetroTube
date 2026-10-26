@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -35,6 +37,9 @@ MAX_SOURCE_BYTES = 250 * 1024 * 1024
 ALLOWED_ORIGIN = os.getenv("RETROTUBE_FRONTEND_ORIGIN", "https://white13291.github.io").rstrip("/")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 DAILYMOTION_ID = re.compile(r"^dailymotion_([A-Za-z0-9]{5,14})$")
+PEERTUBE_ID = re.compile(r"^peertube_([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$")
+PEERTUBE_SEARCH = ("https://search.joinpeertube.org", "https://peertube.tv")
+PEERTUBE_INDEX = VIDEO_DIR / "peertube-index.json"
 # Public Piped instances. Their metadata and media proxies are third-party services,
 # so they may disappear or decline requests at any time.
 PIPED_INSTANCES = (
@@ -72,6 +77,99 @@ def approved_media_url(url: str) -> bool:
                  any(host == suffix or host.endswith("." + suffix) for suffix in PIPED_PROXY_SUFFIXES)))
     except (TypeError, ValueError):
         return False
+
+
+def peertube_public_url(url: str) -> bool:
+    """Never let search results direct the server at local hosts or IP literals."""
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        return bool(parts.scheme == "https" and "." in host and
+                    re.fullmatch(r"[a-z0-9.-]{4,253}", host) and
+                    not any(host == suffix or host.endswith("." + suffix) for suffix in
+                            ("localhost", "local", "internal", "test", "invalid")) and
+                    not parts.username and not parts.password and parts.port in (None, 443) and
+                    not host.startswith("-") and not host.endswith("-"))
+    except (TypeError, ValueError):
+        return False
+
+
+def peertube_public_network(url: str) -> bool:
+    """Reject hosts resolving to loopback, private, link-local or reserved IPs."""
+    if not peertube_public_url(url):
+        return False
+    host = urlsplit(url).hostname
+    try:
+        if ipaddress.ip_address(host):
+            return False  # Only domain names are accepted.
+    except ValueError:
+        pass
+    try:
+        addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        return bool(addresses) and all(ipaddress.ip_address(entry[4][0]).is_global for entry in addresses)
+    except (OSError, ValueError):
+        return False
+
+
+class PublicPeerRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not peertube_public_network(newurl):
+            raise ValueError("Redirecionamento de vídeo não autorizado")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+PEERTUBE_OPENER = build_opener(PublicPeerRedirects())
+
+
+def peertube_json(url: str):
+    if not peertube_public_network(url):
+        raise ValueError("Servidor PeerTube não autorizado")
+    req = Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "application/json"})
+    with PEERTUBE_OPENER.open(req, timeout=15) as remote:
+        length = remote.headers.get("Content-Length")
+        if length and int(length) > 2_500_000:
+            raise ValueError("Resposta PeerTube muito grande")
+        data = remote.read(2_500_001)
+    if len(data) > 2_500_000:
+        raise ValueError("Resposta PeerTube muito grande")
+    return json.loads(data)
+
+
+def remember_peertube_videos(videos: dict[str, str]):
+    """Remember search-issued video links across server restarts; no user URL inputs."""
+    if not videos:
+        return
+    with LOCK:
+        try:
+            entries = json.loads(PEERTUBE_INDEX.read_text(encoding="utf-8"))
+            if not isinstance(entries, dict):
+                entries = {}
+        except (OSError, ValueError):
+            entries = {}
+        entries.update(videos)
+        entries = dict(list(entries.items())[-500:])
+        temporary = PEERTUBE_INDEX.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, PEERTUBE_INDEX)
+
+
+def peertube_link(identifier: str) -> str:
+    if not PEERTUBE_ID.fullmatch(identifier):
+        raise ValueError("Vídeo PeerTube inválido")
+    with LOCK:
+        try:
+            entries = json.loads(PEERTUBE_INDEX.read_text(encoding="utf-8"))
+            link = entries.get(identifier, "") if isinstance(entries, dict) else ""
+        except (OSError, ValueError):
+            link = ""
+    if not link:
+        raise ValueError("Vídeo não localizado. Pesquise novamente no RetroTube.")
+    if not peertube_public_url(link):
+        raise ValueError("Endereço do vídeo não autorizado")
+    path = urlsplit(link).path
+    if not path.endswith("/" + identifier[len("peertube_"):]):
+        raise ValueError("Endereço PeerTube inconsistente")
+    return link
 
 
 class ApprovedRedirects(HTTPRedirectHandler):
@@ -270,7 +368,8 @@ def piped_video(identifier: str, work: Path) -> Path:
 
 
 def valid_id(value: str) -> str:
-    if not (VIDEO_ID.fullmatch(value or "") or DAILYMOTION_ID.fullmatch(value or "")):
+    if not (VIDEO_ID.fullmatch(value or "") or DAILYMOTION_ID.fullmatch(value or "") or
+            PEERTUBE_ID.fullmatch(value or "")):
         abort(400, "Identificador de vídeo inválido")
     return value
 
@@ -386,6 +485,150 @@ def search_dailymotion(query: str):
     return items
 
 
+def search_peertube(query: str):
+    """Search publicly indexed PeerTube videos without API keys or logins."""
+    failures = []
+    for base in PEERTUBE_SEARCH:
+        try:
+            response = peertube_json(base + "/api/v1/search/videos?" + urlencode({
+                "search": query, "count": 15, "start": 0
+            }))
+            if not isinstance(response, dict) or not isinstance(response.get("data"), list):
+                raise ValueError("Resposta de busca inválida")
+            items = []
+            links = {}
+            for entry in response["data"]:
+                if not isinstance(entry, dict):
+                    continue
+                uid = str(entry.get("uuid") or "").lower()
+                identifier = "peertube_" + uid
+                if not PEERTUBE_ID.fullmatch(identifier) or not entry.get("name"):
+                    continue
+                if entry.get("isLive") or entry.get("nsfw"):
+                    continue
+                try:
+                    duration = int(entry.get("duration") or 0)
+                except (ValueError, TypeError):
+                    continue
+                if not 0 < duration <= MAX_DURATION:
+                    continue
+                original = str(entry.get("url") or "")
+                if not peertube_public_url(original):
+                    continue
+                parts = urlsplit(original)
+                if not (parts.path.endswith("/" + uid) or parts.path.endswith("/" + str(entry.get("shortUUID") or "***"))):
+                    continue
+                # Store a canonical origin video URL; never accept a client-supplied hostname.
+                canonical = "https://" + parts.hostname + "/videos/watch/" + uid
+                if not peertube_public_network(canonical):
+                    continue
+                thumbnail = str(entry.get("thumbnailUrl") or "")
+                if not peertube_public_url(thumbnail):
+                    thumb_path = str(entry.get("thumbnailPath") or "")
+                    thumbnail = (base + thumb_path) if thumb_path.startswith("/") else ""
+                account = entry.get("channel") or entry.get("account") or {}
+                if not isinstance(account, dict):
+                    account = {}
+                items.append({
+                    "id": identifier,
+                    "title": str(entry["name"])[:160],
+                    "channel": str(account.get("displayName") or account.get("name") or "PeerTube")[:100],
+                    "duration": duration,
+                    "thumbnail": thumbnail,
+                    "original_url": canonical,
+                })
+                links[identifier] = canonical
+                if len(items) >= 12:
+                    break
+            if items:
+                remember_peertube_videos(links)
+                return items
+            failures.append(urlsplit(base).hostname + ": sem vídeos compatíveis")
+        except Exception as error:
+            app.logger.warning("Busca PeerTube %s falhou: %s", base, str(error)[:150])
+            failures.append(urlsplit(base).hostname + ": indisponível")
+    raise RuntimeError("PeerTube não retornou vídeos reproduzíveis. " + "; ".join(failures))
+
+
+def peertube_video(identifier: str, work: Path) -> Path:
+    """Download a public PeerTube video (progressive or fragmented MP4) from its origin."""
+    uid = PEERTUBE_ID.fullmatch(identifier).group(1)
+    original = peertube_link(identifier)
+    origin = "https://" + urlsplit(original).hostname
+    details = peertube_json(origin + "/api/v1/videos/" + uid)
+    if not isinstance(details, dict):
+        raise ValueError("Metadados PeerTube inválidos")
+    duration = int(details.get("duration") or 0)
+    if not 0 < duration <= MAX_DURATION or details.get("isLive"):
+        raise ValueError("Vídeo sem duração conhecida, ao vivo ou longo demais")
+    choices = []
+    video_lists = [details.get("files") or []]
+    for playlist in details.get("streamingPlaylists") or []:
+        if isinstance(playlist, dict):
+            video_lists.append(playlist.get("files") or [])
+    for files in video_lists:
+        for entry in files:
+            if not isinstance(entry, dict):
+                continue
+            file_url = str(entry.get("fileUrl") or "")
+            if not peertube_public_url(file_url):
+                continue
+            try:
+                height = int((entry.get("resolution") or {}).get("id") or 0)
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if not 0 < height <= 480:
+                continue
+            file_path = urlsplit(file_url).path.lower()
+            if not (file_path.endswith(".mp4") or file_path.endswith(".webm")):
+                continue
+            try:
+                size = int(entry.get("size") or 0)
+            except (ValueError, TypeError):
+                size = 0
+            if size > MAX_SOURCE_BYTES:
+                continue
+            choices.append((height, file_url))
+    if not choices:
+        raise ValueError("Este vídeo PeerTube não oferece um arquivo MP4/WebM até 480p")
+    choices.sort(key=lambda choice: choice[0], reverse=True)
+    errors = []
+    for _, url in choices[:5]:
+        source = work / ("peertube-source" + (".webm" if urlsplit(url).path.lower().endswith(".webm") else ".mp4"))
+        try:
+            if not peertube_public_network(url):
+                raise ValueError("Servidor de vídeo não autorizado")
+            set_job(identifier, "baixando", title=str(details.get("name") or "Vídeo")[:160])
+            req = Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "video/*"})
+            with PEERTUBE_OPENER.open(req, timeout=25) as remote:
+                content_type = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if not (content_type.startswith("video/") or content_type == "application/octet-stream"):
+                    raise ValueError("Fonte não retornou um arquivo de vídeo")
+                length = remote.headers.get("Content-Length")
+                if length and int(length) > MAX_SOURCE_BYTES:
+                    raise ValueError("Vídeo excede 250 MB")
+                transferred = 0
+                started = time.monotonic()
+                with source.open("wb") as target:
+                    while True:
+                        if time.monotonic() - started > 300:
+                            raise TimeoutError("Transferência muito lenta")
+                        block = remote.read(131072)
+                        if not block:
+                            break
+                        transferred += len(block)
+                        if transferred > MAX_SOURCE_BYTES:
+                            raise ValueError("Vídeo excede 250 MB")
+                        target.write(block)
+            if source.stat().st_size > 0:
+                return source
+        except Exception as error:
+            errors.append(str(error)[:90])
+            app.logger.warning("Fonte PeerTube rejeitada: %s", type(error).__name__)
+            source.unlink(missing_ok=True)
+    raise RuntimeError("Não foi possível obter um MP4 deste PeerTube: " + "; ".join(errors)[:200])
+
+
 def search_piped(query: str):
     """Search result fallback when yt-dlp YouTube search is unavailable."""
     for base in PIPED_INSTANCES:
@@ -420,6 +663,7 @@ def prepare_video(identifier: str):
         cache_cleanup()
         work = Path(tempfile.mkdtemp(prefix=identifier + "-", dir=VIDEO_DIR))
         set_job(identifier, "obtendo")
+        peer_match = PEERTUBE_ID.fullmatch(identifier)
         dm_match = DAILYMOTION_ID.fullmatch(identifier)
         url = ("https://www.dailymotion.com/video/" + dm_match.group(1)
                if dm_match else "https://www.youtube.com/watch?v=" + identifier)
@@ -432,7 +676,9 @@ def prepare_video(identifier: str):
             "max_filesize": 500 * 1024 * 1024
         }
         source = None
-        if YoutubeDL is not None:
+        if peer_match:
+            source = peertube_video(identifier, work)
+        elif YoutubeDL is not None:
             try:
                 with YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=False)
@@ -499,9 +745,15 @@ def search():
     query = (request.args.get("q") or "").strip()[:90]
     if len(query) < 2:
         return json_error("Digite pelo menos duas letras.", 400)
-    source = (request.args.get("source") or "dailymotion").lower()
-    if source not in ("youtube", "dailymotion"):
+    source = (request.args.get("source") or "peertube").lower()
+    if source not in ("youtube", "dailymotion", "peertube"):
         return json_error("Fonte de vídeo inválida.", 400)
+    if source == "peertube":
+        try:
+            return jsonify({"items": search_peertube(query)})
+        except Exception as error:
+            app.logger.warning("Busca PeerTube falhou: %s", type(error).__name__)
+            return json_error(str(error)[:280], 503)
     if source == "dailymotion":
         try:
             items = search_dailymotion(query)
@@ -596,7 +848,7 @@ def demo_video():
 @app.get("/api/thumb/<identifier>")
 def thumbnail(identifier):
     identifier = valid_id(identifier)
-    if DAILYMOTION_ID.fullmatch(identifier):
+    if DAILYMOTION_ID.fullmatch(identifier) or PEERTUBE_ID.fullmatch(identifier):
         abort(404)
     check_rate_limit("thumb", 120)
     try:

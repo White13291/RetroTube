@@ -187,7 +187,7 @@ class PipedFallbackTests(unittest.TestCase):
                  patch.object(backend, "peertube_json", return_value=response), \
                  patch.object(backend, "peertube_check_search_item", return_value={
                      "sources": [{"height": 360, "url": "https://tube.tchncs.de/static/webseed/test-360.mp4"}],
-                     "name": "Hino Nacional Brasileiro", "checked": 1700000000
+                     "name": "Hino Nacional Brasileiro", "checked": 1700000000, "media_checked": True
                  }), \
                  patch.object(backend, "peertube_public_network", return_value=True):
                 results = backend.search_peertube("brasil")
@@ -209,6 +209,35 @@ class PipedFallbackTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "origem acessível"):
                 backend.search_peertube("noticias")
 
+    def test_peertube_prefers_working_alternate_download_to_missing_mp4(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        dead_url = "https://tube.tchncs.de/static/web-videos/missing.mp4"
+        alive_url = "https://tube.tchncs.de/download/videos/" + uid + "/360"
+        details = {"uuid": uid, "duration": 45, "name": "Teste", "files": [{
+            "fileUrl": dead_url, "fileDownloadUrl": alive_url,
+            "resolution": {"id": 360}, "size": 2000000,
+        }]}
+        choices = backend.peertube_file_choices(details)
+        self.assertIn((360, dead_url), choices)
+        self.assertIn((360, alive_url), choices)
+        item = {"id": "peertube_" + uid, "original_url": "https://tube.tchncs.de/videos/watch/" + uid,
+                "title": "Teste"}
+        with patch.object(backend, "peertube_json", return_value=details), \
+             patch.object(backend, "peertube_media_alive", side_effect=lambda url: url == alive_url):
+            result = backend.peertube_check_search_item(item)
+        self.assertEqual(result["sources"], [{"height": 360, "url": alive_url}])
+
+    def test_peertube_rejects_http_404_media_preflight(self):
+        from urllib.error import HTTPError
+
+        class MissingMedia:
+            def open(self, *args, **kwargs):
+                raise HTTPError("https://tube.tchncs.de/x.mp4", 404, "Not Found", {}, None)
+
+        with patch.object(backend, "peertube_public_network", return_value=True), \
+             patch.object(backend, "PEERTUBE_OPENER", MissingMedia()):
+            self.assertFalse(backend.peertube_media_alive("https://tube.tchncs.de/x.mp4"))
+
     def test_peertube_uses_verified_cached_media_without_origin_api(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"
         identifier = "peertube_" + uid
@@ -219,7 +248,7 @@ class PipedFallbackTests(unittest.TestCase):
                  patch.object(backend, "PEERTUBE_OPENER", FakePeerVideo()):
                 backend.remember_peertube_videos({identifier: {
                     "url": "https://tube.tchncs.de/videos/watch/" + uid,
-                    "checked": __import__("time").time(), "name": "Hino Nacional",
+                    "checked": __import__("time").time(), "name": "Hino Nacional", "media_checked": True,
                     "sources": [{"height": 360, "url": "https://tube.tchncs.de/static/webseed/test-360.mp4"}],
                 }})
                 self.assertEqual(backend.peertube_video(identifier, Path(folder)).read_bytes(),

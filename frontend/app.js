@@ -5,6 +5,7 @@
   var results = document.getElementById("results");
   var watch = document.getElementById("watch");
   var query = document.getElementById("search-query");
+  var sourceSelect = document.getElementById("search-source");
   var player = document.getElementById("player");
   var status = document.getElementById("video-status");
   var title = document.getElementById("video-title");
@@ -23,7 +24,13 @@
   ];
 
   function valid(id) {
-    return /^[A-Za-z0-9_-]{11}$/.test(id || "");
+    return /^(?:[A-Za-z0-9_-]{11}|dailymotion_[A-Za-z0-9]{5,14})$/.test(id || "");
+  }
+  function isDailymotion(id) {
+    return /^dailymotion_[A-Za-z0-9]{5,14}$/.test(id || "");
+  }
+  function selectedSource() {
+    return sourceSelect.value === "youtube" ? "youtube" : "dailymotion";
   }
   function getKey() {
     if (memoryKey) return memoryKey;
@@ -52,6 +59,10 @@
   function getId(value) {
     value = String(value || "").replace(/^\s+|\s+$/g, "");
     if (valid(value)) return value;
+    var daily = /^(?:https?:\/\/)?(?:(?:www|touch)\.)?dailymotion\.com\/video\/([A-Za-z0-9]{5,14})(?:[_?&#/]|$)/i.exec(value);
+    if (daily) return "dailymotion_" + daily[1];
+    var dailyShort = /^(?:https?:\/\/)?dai\.ly\/([A-Za-z0-9]{5,14})(?:[?&#/]|$)/i.exec(value);
+    if (dailyShort) return "dailymotion_" + dailyShort[1];
     var short = /^(?:https?:\/\/)?(?:www\.)?youtu\.be\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i.exec(value);
     if (short) return short[1];
     var video = /^(?:https?:\/\/)?(?:(?:www|m|music)\.)?youtube\.com\/(?:embed|shorts|live)\/([A-Za-z0-9_-]{11})(?:[?&#/]|$)/i.exec(value);
@@ -76,16 +87,19 @@
     message.className = "hide";
     results.className = "hide";
     watch.className = "panel";
-    query.value = "https://www.youtube.com/watch?v=" + id;
+    var daily = isDailymotion(id);
+    query.value = daily ? "https://www.dailymotion.com/video/" + id.slice(12) : "https://www.youtube.com/watch?v=" + id;
     title.textContent = param("t").slice(0, 160) || "Vídeo " + id;
     status.textContent = "Preparando vídeo para o Safari antigo…";
     document.getElementById("youtube-link").className = "";
     player.removeAttribute("src");
     player.load();
     prepareVideo(id);
-    document.getElementById("youtube-link").href = "https://m.youtube.com/watch?v=" + id;
+    document.getElementById("youtube-link").href = daily ?
+      "https://www.dailymotion.com/video/" + id.slice(12) : "https://m.youtube.com/watch?v=" + id;
+    document.getElementById("youtube-link").textContent = daily ? "Abrir no Dailymotion" : "Abrir no YouTube";
     document.getElementById("back-to-search").href = param("q") ?
-      "?q=" + encodeURIComponent(param("q")) : "./";
+      "?q=" + encodeURIComponent(param("q")) + "&source=" + encodeURIComponent(param("source") || (daily ? "dailymotion" : "youtube")) : "./";
     document.getElementById("alternate-player").onclick = function (event) {
       if (event && event.preventDefault) event.preventDefault();
       if (event) event.returnValue = false;
@@ -189,15 +203,17 @@
     }
     return output;
   }
-  function videoCard(parent, video, q) {
+  function videoCard(parent, video, q, source) {
     var row = document.createElement("div");
     row.className = "item";
     var link = document.createElement("a");
     link.href = "?v=" + encodeURIComponent(video.id) +
-      "&q=" + encodeURIComponent(q) + "&t=" + encodeURIComponent(video.title.slice(0, 160));
+      "&q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(source || "youtube") +
+      "&t=" + encodeURIComponent(video.title.slice(0, 160));
     var thumb = document.createElement("img");
     thumb.className = "thumb";
-    thumb.src = "https://i.ytimg.com/vi/" + video.id + "/mqdefault.jpg";
+    thumb.src = video.thumbnail || (isDailymotion(video.id) ? "logo.png" :
+      "https://i.ytimg.com/vi/" + video.id + "/mqdefault.jpg");
     thumb.alt = "Assistir: " + video.title.slice(0, 100);
     thumb.width = 155;
     thumb.height = 87;
@@ -293,7 +309,7 @@
             success = true;
             progress.textContent = items.length + " vídeos encontrados. Toque para assistir no RetroTube.";
             var j;
-            for (j = 0; j < items.length; j++) videoCard(cards, items[j], q);
+            for (j = 0; j < items.length; j++) videoCard(cards, items[j], q, "youtube");
             return;
           }
           count--;
@@ -316,6 +332,9 @@
     watch.className = "hide";
     results.className = "panel";
     query.value = q;
+    var source = param("source") || selectedSource();
+    if (source !== "youtube") source = "dailymotion";
+    sourceSelect.value = source;
     results.innerHTML = "";
     textNode(results, "h1", "Resultados para: " + q);
     var progress = textNode(results, "p", "Preparando pesquisa…");
@@ -324,16 +343,20 @@
     results.appendChild(cards);
     if (location.hostname && location.hostname !== "white13291.github.io") {
       progress.textContent = "Buscando vídeos pela VPS…";
-      backendRequest("/api/search?q=" + encodeURIComponent(q), function (error, data) {
+      backendRequest("/api/search?q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(source), function (error, data) {
         if (error) {
-          progress.textContent = error + ". Você também pode configurar a busca do YouTube.";
-          addPublicButton(results, progress, cards, q);
+          progress.textContent = error + (source === "youtube" ? ". Você também pode configurar a busca do YouTube." : "");
+          if (source === "youtube") addPublicButton(results, progress, cards, q);
           return;
         }
         var items = data && data.items ? data.items : [];
         progress.textContent = items.length ? items.length + " vídeos encontrados. Toque para assistir." : "Nenhum vídeo encontrado.";
-        for (var k = 0; k < items.length; k++) videoCard(cards, items[k], q);
+        for (var k = 0; k < items.length; k++) videoCard(cards, items[k], q, source);
       });
+      return;
+    }
+    if (source === "dailymotion") {
+      progress.textContent = "A busca do Dailymotion funciona pelo endereço da sua VPS. Abra o RetroTube na VPS para pesquisar.";
       return;
     }
     var key = getKey();
@@ -360,7 +383,7 @@
       } else {
         progress.textContent = items.length + " vídeos encontrados. Toque para assistir no RetroTube.";
         var i;
-        for (i = 0; i < items.length; i++) videoCard(cards, items[i], q);
+        for (i = 0; i < items.length; i++) videoCard(cards, items[i], q, "youtube");
       }
     });
   }
@@ -407,7 +430,7 @@
     if (!q) return false;
     try {
       if (typeof history !== "undefined" && history.pushState) {
-        history.pushState(null, "", "?q=" + encodeURIComponent(q));
+        history.pushState(null, "", "?q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(selectedSource()));
       }
     } catch (ignore) {}
     showSearch(q);

@@ -40,6 +40,7 @@ DAILYMOTION_ID = re.compile(r"^dailymotion_([A-Za-z0-9]{5,14})$")
 PEERTUBE_ID = re.compile(r"^peertube_([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$")
 PEERTUBE_SEARCH = ("https://search.joinpeertube.org", "https://peertube.tv")
 PEERTUBE_INDEX = VIDEO_DIR / "peertube-index.json"
+VIDEO_QUALITIES = (360, 480, 720)
 # Public Piped instances. Their metadata and media proxies are third-party services,
 # so they may disappear or decline requests at any time.
 PIPED_INSTANCES = (
@@ -61,6 +62,7 @@ INVIDIOUS_INSTANCES = (
 INVIDIOUS_MEDIA_HOSTS = tuple(urlsplit(base).hostname for base in INVIDIOUS_INSTANCES)
 POOL = ThreadPoolExecutor(max_workers=MAX_ACTIVE_JOBS)
 JOBS: dict[str, dict] = {}
+QUALITY_MEMORY: dict[str, tuple[float, list[int]]] = {}
 LOCK = threading.RLock()
 DEMO_LOCK = threading.Lock()
 REQUESTS: dict[str, deque] = defaultdict(deque)
@@ -243,7 +245,7 @@ def invidious_json(base: str, path: str):
     return json.loads(raw)
 
 
-def invidious_video(identifier: str, work: Path) -> Path:
+def invidious_video(identifier: str, work: Path, quality: int = 360) -> Path:
     """Obtain a progressive MP4 via a public Invidious instance's local proxy."""
     failures = []
     for base in INVIDIOUS_INSTANCES:
@@ -264,18 +266,19 @@ def invidious_video(identifier: str, work: Path) -> Path:
                     continue
                 try:
                     itag = int(item.get("itag") or 0)
-                    quality = int(re.search(r"\d+", str(item.get("qualityLabel") or "360p")).group())
+                    source_height = int(re.search(r"\d+", str(item.get("qualityLabel") or "360p")).group())
                 except (TypeError, ValueError, AttributeError):
                     continue
-                if 0 < itag < 1000 and 0 < quality <= 480 and (
+                if 0 < itag < 1000 and (0 < source_height <= 480 if quality == 360 else
+                                      quality <= source_height <= 1080) and (
                     "mp4" in str(item.get("type") or "").lower() or
                     str(item.get("container") or "").lower() == "mp4"
                 ):
-                    choices.append((quality, itag))
+                    choices.append((source_height, itag))
             if not choices:
-                raise ValueError("Sem MP4 progressivo com áudio até 480p")
-            choices.sort(reverse=True)
-            set_job(identifier, "alternativo", title=str(data.get("title") or "Vídeo")[:160])
+                raise ValueError("Sem MP4 progressivo com áudio nesta resolução")
+            choices.sort(key=lambda item: abs(item[0] - quality))
+            set_job(identifier, "alternativo", quality=quality, title=str(data.get("title") or "Vídeo")[:160])
             # 'local=true' keeps the media request on the Invidious video proxy.
             url = base + "/latest_version?" + urlencode({
                 "id": identifier, "itag": choices[0][1], "local": "true"
@@ -357,7 +360,7 @@ def piped_json(base: str, path: str) -> dict:
     return result
 
 
-def piped_video(identifier: str, work: Path) -> Path:
+def piped_video(identifier: str, work: Path, quality: int = 360) -> Path:
     """Download one public Piped progressive MP4 through its media proxy."""
     failures = []
     for base in PIPED_INSTANCES:
@@ -374,14 +377,15 @@ def piped_video(identifier: str, work: Path) -> Path:
             formats = [s for s in (data.get("videoStreams") or [])
                        if isinstance(s, dict) and not s.get("videoOnly") and
                        str(s.get("mimeType") or "").startswith("video/mp4") and
-                       0 < int(s.get("height") or 0) <= 480 and
+                       (0 < int(s.get("height") or 0) <= 480 if quality == 360 else
+                        quality <= int(s.get("height") or 0) <= 1080) and
                        approved_media_url(str(s.get("url") or "")) and
                        urlsplit(str(s.get("url"))).hostname == proxy]
-            formats.sort(key=lambda item: int(item.get("height") or 0), reverse=True)
+            formats.sort(key=lambda item: abs(int(item.get("height") or 0) - quality))
             if not formats:
                 failures.append(name + ": sem MP4 com áudio")
                 continue
-            set_job(identifier, "alternativo", title=str(data.get("title") or "Vídeo")[:160])
+            set_job(identifier, "alternativo", quality=quality, title=str(data.get("title") or "Vídeo")[:160])
             source = work / "piped-source.mp4"
             req = Request(formats[0]["url"], headers={"User-Agent": "RetroTube/1.0"})
             with PIPED_OPENER.open(req, timeout=20) as remote, source.open("wb") as target:
@@ -450,6 +454,26 @@ def cached_path(identifier: str) -> Path:
     return VIDEO_DIR / (identifier + ".mp4")
 
 
+def quality_path(identifier: str, quality: int) -> Path:
+    # The original 360p filename remains valid for previously cached videos.
+    return cached_path(identifier) if quality == 360 else VIDEO_DIR / f"{identifier}-{quality}p.mp4"
+
+
+def quality_job(identifier: str, quality: int) -> str:
+    return f"{identifier}:{quality}"
+
+
+def requested_quality() -> int:
+    raw = request.args.get("quality", "360")
+    if raw not in ("360", "480", "720"):
+        abort(400, "Qualidade inválida")
+    return int(raw)
+
+
+def quality_video_url(identifier: str, quality: int) -> str:
+    return "/api/video/" + identifier + "?quality=" + str(quality)
+
+
 def cache_cleanup():
     """Remove oldest completed files when the configured size is exceeded."""
     files = sorted(VIDEO_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime)
@@ -466,10 +490,11 @@ def cache_cleanup():
             pass
 
 
-def set_job(identifier: str, status: str, **kwargs):
+def set_job(identifier: str, status: str, quality: int = 360, **kwargs):
     with LOCK:
-        previous = JOBS.get(identifier, {})
-        JOBS[identifier] = {**previous, "status": status, "updated": time.time(), **kwargs}
+        key = quality_job(identifier, quality)
+        previous = JOBS.get(key, {})
+        JOBS[key] = {**previous, "status": status, "updated": time.time(), **kwargs}
 
 
 def search_videos(query: str):
@@ -565,7 +590,8 @@ def peertube_file_choices(details: dict):
                 if (height, file_url) not in choices:
                     choices.append((height, file_url))
     choices.sort(key=lambda choice: (choice[0] > 480, abs(choice[0] - 360)))
-    return choices[:8]
+    # Keep higher resolutions too; they are used only if verified on the watch page.
+    return choices[:24]
 
 
 def peertube_media_alive(url: str, timeout: int = 5) -> bool:
@@ -579,6 +605,14 @@ def peertube_media_alive(url: str, timeout: int = 5) -> bool:
         with PEERTUBE_OPENER.open(req, timeout=timeout) as remote:
             mime = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if not (mime.startswith("video/") or mime in ("application/octet-stream", "binary/octet-stream")):
+                return False
+            # A partial (206) response can advertise the full size in Content-Range.
+            content_range = str(remote.headers.get("Content-Range") or "")
+            full_size = re.search(r"/(\d+)$", content_range)
+            if full_size and int(full_size.group(1)) > MAX_SOURCE_BYTES:
+                return False
+            length = remote.headers.get("Content-Length")
+            if length and int(length) > MAX_SOURCE_BYTES:
                 return False
             return bool(remote.read(32))
     except (OSError, ValueError, URLError, HTTPError, TimeoutError):
@@ -608,6 +642,7 @@ def peertube_check_search_item(item: dict):
         if not working:
             return None
         return {"sources": [{"height": h, "url": u} for h, u in working],
+                "candidates": [{"height": h, "url": u} for h, u in choices],
                 "name": str(details.get("name") or item["title"])[:160],
                 "checked": time.time(), "media_checked": True}
     except Exception:
@@ -691,42 +726,98 @@ def search_peertube(query: str):
     raise RuntimeError("PeerTube não retornou vídeos reproduzíveis. " + "; ".join(failures))
 
 
-def peertube_video(identifier: str, work: Path) -> Path:
-    """Download a public PeerTube video (progressive or fragmented MP4) from its origin."""
+def peertube_video_details(identifier: str) -> dict:
+    """Retrieve and validate origin metadata, with the existing federated fallback."""
     uid = PEERTUBE_ID.fullmatch(identifier).group(1)
     original = peertube_link(identifier)
     origin = "https://" + urlsplit(original).hostname
+    details = None
+    failures = []
+    metadata_origins = [origin]
+    if origin != "https://peertube.tv":
+        metadata_origins.append("https://peertube.tv")
+    for server in metadata_origins:
+        try:
+            candidate = peertube_json(server + "/api/v1/videos/" + uid, timeout=22)
+            if isinstance(candidate, dict) and str(candidate.get("uuid") or "").lower() == uid:
+                details = candidate
+                break
+            failures.append(urlsplit(server).hostname + ": vídeo não encontrado")
+        except (OSError, HTTPError, URLError, ValueError, TimeoutError) as error:
+            message = "tempo esgotado" if isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in str(error).lower() else type(error).__name__
+            failures.append(urlsplit(server).hostname + ": " + message)
+    if details is None:
+        raise RuntimeError("Origem PeerTube sem resposta. " + "; ".join(failures) + ". Tente outro vídeo.")
+    duration = int(details.get("duration") or 0)
+    if not 0 < duration <= MAX_DURATION or details.get("isLive"):
+        raise ValueError("Vídeo sem duração conhecida, ao vivo ou longo demais")
+    return details
+
+
+def peertube_available_qualities(identifier: str) -> list[int]:
+    """Verify a real, reachable media source for each advertised output size."""
+    with LOCK:
+        try:
+            entries = json.loads(PEERTUBE_INDEX.read_text(encoding="utf-8"))
+            entry = entries.get(identifier, {}) if isinstance(entries, dict) else {}
+        except (OSError, ValueError):
+            entry = {}
+    now = time.time()
+    if (isinstance(entry, dict) and now - float(entry.get("qualities_checked") or 0) <
+            (900 if entry.get("qualities") else 90) and
+            isinstance(entry.get("qualities"), list)):
+        return [q for q in VIDEO_QUALITIES if q in entry["qualities"]]
+    choices = []
+    if (isinstance(entry, dict) and now - float(entry.get("checked") or 0) < 1200):
+        for source in entry.get("candidates") or []:
+            if isinstance(source, dict) and peertube_public_url(str(source.get("url") or "")):
+                try:
+                    height = int(source.get("height") or 0)
+                except (ValueError, TypeError):
+                    continue
+                if 0 < height <= 1080:
+                    choices.append((height, source["url"]))
+    if not choices:
+        choices = peertube_file_choices(peertube_video_details(identifier))
     cached = peertube_cached_sources(identifier)
-    if cached:
-        choices = cached["choices"]
-        video_title = cached["title"]
-    else:
-        details = None
-        failures = []
-        # PeerTube's global index lists independently operated servers.
-        # A federated instance sometimes has a copy of a video's metadata.
-        metadata_origins = [origin]
-        if origin != "https://peertube.tv":
-            metadata_origins.append("https://peertube.tv")
-        for server in metadata_origins:
-            try:
-                candidate = peertube_json(server + "/api/v1/videos/" + uid, timeout=22)
-                if isinstance(candidate, dict) and str(candidate.get("uuid") or "").lower() == uid:
-                    details = candidate
-                    break
-                failures.append(urlsplit(server).hostname + ": vídeo não encontrado")
-            except (OSError, HTTPError, URLError, ValueError, TimeoutError) as error:
-                message = "tempo esgotado" if isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in str(error).lower() else type(error).__name__
-                failures.append(urlsplit(server).hostname + ": " + message)
-        if details is None:
-            raise RuntimeError("Origem PeerTube sem resposta. " + "; ".join(failures) + ". Tente outro vídeo.")
-        duration = int(details.get("duration") or 0)
-        if not 0 < duration <= MAX_DURATION or details.get("isLive"):
-            raise ValueError("Vídeo sem duração conhecida, ao vivo ou longo demais")
+    verified = list(cached["choices"]) if cached else []
+    checked_urls = {url for _, url in verified}
+    for quality in VIDEO_QUALITIES:
+        if any(height >= quality for height, _ in verified):
+            continue
+        eligible = sorted((h, url) for h, url in choices if h >= quality and url not in checked_urls)
+        for height, url in eligible[:3]:
+            checked_urls.add(url)
+            if peertube_media_alive(url):
+                verified.append((height, url))
+                break
+    available = [q for q in VIDEO_QUALITIES if any(h >= q for h, _ in verified)]
+    # Older indexes stored only the original URL as a string. Keep that link
+    # when upgrading the cache; it is required for later downloads.
+    entry = entry if isinstance(entry, dict) else {"url": entry} if isinstance(entry, str) else {}
+    entry.update({"sources": [{"height": h, "url": u} for h, u in verified],
+                  "candidates": [{"height": h, "url": u} for h, u in choices],
+                  "checked": now, "media_checked": bool(verified),
+                  "qualities": available, "qualities_checked": now})
+    remember_peertube_videos({identifier: entry})
+    return available
+
+
+def peertube_video(identifier: str, work: Path, quality: int = 360) -> Path:
+    """Download a source capable of the requested resolution, without upscaling."""
+    cached = peertube_cached_sources(identifier)
+    choices = cached["choices"] if cached else []
+    if not choices or (quality > 360 and not any(h >= quality for h, _ in choices)):
+        details = peertube_video_details(identifier)
         choices = peertube_file_choices(details)
         video_title = str(details.get("name") or "Vídeo")[:160]
+    else:
+        video_title = cached["title"]
+    if quality > 360:
+        choices = [(h, url) for h, url in choices if h >= quality]
+        choices.sort(key=lambda item: item[0] - quality)
     if not choices:
-        raise ValueError("Este vídeo PeerTube não oferece arquivo MP4/WebM público")
+        raise ValueError("Este vídeo PeerTube não oferece fonte pública nesta resolução")
     errors = []
     # Retry the smallest preferred source once after trying alternatives.
     for _, url in (choices[:5] + choices[:1]):
@@ -734,7 +825,7 @@ def peertube_video(identifier: str, work: Path) -> Path:
         try:
             if not peertube_public_network(url):
                 raise ValueError("Servidor de vídeo não autorizado")
-            set_job(identifier, "baixando", title=video_title)
+            set_job(identifier, "baixando", quality=quality, title=video_title)
             req = Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "video/*"})
             with PEERTUBE_OPENER.open(req, timeout=35) as remote:
                 content_type = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -793,18 +884,20 @@ def search_piped(query: str):
     return []
 
 
-def prepare_video(identifier: str):
+def prepare_video(identifier: str, quality: int = 360):
     work = None
     try:
         cache_cleanup()
         work = Path(tempfile.mkdtemp(prefix=identifier + "-", dir=VIDEO_DIR))
-        set_job(identifier, "obtendo")
+        set_job(identifier, "obtendo", quality=quality)
         peer_match = PEERTUBE_ID.fullmatch(identifier)
         dm_match = DAILYMOTION_ID.fullmatch(identifier)
         url = ("https://www.dailymotion.com/video/" + dm_match.group(1)
                if dm_match else "https://www.youtube.com/watch?v=" + identifier)
         opts = {
-            "format": "bv*[height<=480]+ba/b[height<=480]/b",
+            "format": ("bv*[height<=480]+ba/b[height<=480]/b" if quality == 360 else
+                       f"bv*[height={quality}]+ba/b[height={quality}]/"
+                       f"bv*[height>={quality}][height<=1080]+ba/b[height>={quality}][height<=1080]"),
             "outtmpl": str(work / "source.%(ext)s"),
             "merge_output_format": "mkv",
             "noplaylist": True, "quiet": True, "no_warnings": True,
@@ -813,7 +906,7 @@ def prepare_video(identifier: str):
         }
         source = None
         if peer_match:
-            source = peertube_video(identifier, work)
+            source = peertube_video(identifier, work, quality=quality)
         elif YoutubeDL is not None:
             try:
                 with YoutubeDL(opts) as ydl:
@@ -821,7 +914,7 @@ def prepare_video(identifier: str):
                     duration = int(info.get("duration") or 0)
                     if not duration or duration > MAX_DURATION or info.get("is_live"):
                         raise ValueError("O vídeo é ao vivo, não possui duração conhecida ou excede o limite permitido.")
-                    set_job(identifier, "baixando", title=info.get("title", "Vídeo"))
+                    set_job(identifier, "baixando", quality=quality, title=info.get("title", "Vídeo"))
                     ydl.download([url])
                 candidates = [p for p in work.iterdir() if p.is_file() and p.suffix.lower() in (".mkv", ".mp4", ".webm", ".m4v")]
                 if candidates:
@@ -834,37 +927,92 @@ def prepare_video(identifier: str):
         if source is None:
             if dm_match:
                 raise RuntimeError("Dailymotion não forneceu um vídeo reproduzível à VPS. Tente outro vídeo.")
-            set_job(identifier, "alternativo")
+            set_job(identifier, "alternativo", quality=quality)
             try:
-                source = invidious_video(identifier, work)
+                source = invidious_video(identifier, work, quality=quality)
             except RuntimeError as invidious_error:
                 try:
-                    source = piped_video(identifier, work)
+                    source = piped_video(identifier, work, quality=quality)
                 except RuntimeError as piped_error:
                     raise RuntimeError(str(invidious_error) + " | " + str(piped_error)) from piped_error
-        set_job(identifier, "convertendo")
+        set_job(identifier, "convertendo", quality=quality)
         output = work / "ready.mp4"
         command = [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
             # iOS 8 hardware decoders are happier with 30 fps H.264 baseline.
-            "-vf", "scale=-2:360,fps=30",
+            "-vf", f"scale=-2:{quality},fps=30",
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27",
-            "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "3.0",
+            "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "3.1" if quality == 720 else "3.0",
             "-c:a", "aac", "-b:a", "96k", "-ac", "2",
             "-movflags", "+faststart", str(output)
         ]
         finished = subprocess.run(command, capture_output=True, text=True, timeout=2400)
         if finished.returncode or not output.exists() or output.stat().st_size == 0:
             raise RuntimeError("A conversão MP4 falhou: " + finished.stderr[-300:])
-        os.replace(output, cached_path(identifier))
-        set_job(identifier, "pronto")
+        os.replace(output, quality_path(identifier, quality))
+        set_job(identifier, "pronto", quality=quality)
     except Exception as error:
         # Keep the error short: do not expose subprocess commands or filesystem paths.
-        app.logger.warning("Erro ao preparar %s: %s", identifier, str(error)[:350])
-        set_job(identifier, "erro", message=str(error)[:350])
+        app.logger.warning("Erro ao preparar %s em %sp: %s", identifier, quality, str(error)[:350])
+        set_job(identifier, "erro", quality=quality, message=str(error)[:350])
     finally:
         if work:
             shutil.rmtree(work, ignore_errors=True)
+
+
+def available_video_qualities(identifier: str) -> list[int]:
+    """Show a size only when the source has at least that many pixels vertically."""
+    now = time.time()
+    with LOCK:
+        saved = QUALITY_MEMORY.get(identifier)
+        if saved and now - saved[0] < (600 if saved[1] else 90):
+            available = list(saved[1])
+        else:
+            available = None
+    if available is None:
+        try:
+            if PEERTUBE_ID.fullmatch(identifier):
+                available = peertube_available_qualities(identifier)
+            else:
+                if YoutubeDL is None:
+                    raise RuntimeError("Extrator indisponível")
+                raw_id = DAILYMOTION_ID.fullmatch(identifier)
+                url = ("https://www.dailymotion.com/video/" + raw_id.group(1)
+                       if raw_id else "https://www.youtube.com/watch?v=" + identifier)
+                opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                        "noplaylist": True, "socket_timeout": 12, "retries": 1}
+                with YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                duration = int(info.get("duration") or 0)
+                if duration <= 0 or duration > MAX_DURATION or info.get("is_live"):
+                    raise ValueError("Duração de vídeo inválida")
+                heights = []
+                has_audio = False
+                for fmt in info.get("formats") or []:
+                    if not isinstance(fmt, dict) or not fmt.get("url"):
+                        continue
+                    if fmt.get("acodec") not in (None, "none"):
+                        has_audio = True
+                    if fmt.get("vcodec") == "none":
+                        continue
+                    try:
+                        height = int(fmt.get("height") or 0)
+                    except (TypeError, ValueError):
+                        continue
+                    if 0 < height <= 1080:
+                        heights.append(height)
+                available = ([quality for quality in VIDEO_QUALITIES
+                              if any(height >= quality for height in heights)] if has_audio else [])
+        except Exception as error:
+            app.logger.warning("Resoluções não verificadas para %s: %s", identifier, type(error).__name__)
+            available = []
+        with LOCK:
+            if len(QUALITY_MEMORY) >= 256:
+                QUALITY_MEMORY.clear()
+            QUALITY_MEMORY[identifier] = (now, list(available))
+    # Previously converted files are also genuinely available, even offline.
+    return [quality for quality in VIDEO_QUALITIES
+            if quality in available or quality_path(identifier, quality).is_file()]
 
 
 @app.get("/api/health")
@@ -874,6 +1022,13 @@ def health():
         "yt_dlp": YoutubeDL is not None,
         "ffmpeg": shutil.which("ffmpeg") is not None
     })
+
+
+@app.get("/api/qualities/<identifier>")
+def qualities(identifier):
+    identifier = valid_id(identifier)
+    check_rate_limit("qualities", 20)
+    return jsonify({"qualities": available_video_qualities(identifier)})
 
 
 @app.get("/api/search")
@@ -916,28 +1071,31 @@ def search():
 @app.get("/api/prepare/<identifier>")
 def prepare(identifier):
     identifier = valid_id(identifier)
-    if cached_path(identifier).exists():
-        return jsonify({"status": "pronto", "video_url": "/api/video/" + identifier})
+    quality = requested_quality()
+    if quality_path(identifier, quality).is_file():
+        return jsonify({"status": "pronto", "video_url": quality_video_url(identifier, quality)})
     check_rate_limit("prepare", 12)
     with LOCK:
-        current = JOBS.get(identifier)
+        key = quality_job(identifier, quality)
+        current = JOBS.get(key)
         if current and current["status"] not in ("erro", "pronto"):
             return jsonify({"status": current["status"]})
         active = sum(1 for item in JOBS.values() if item["status"] not in ("erro", "pronto"))
         if active >= MAX_QUEUE:
             return json_error("Servidor ocupado. Tente novamente em alguns minutos.", 429)
-        JOBS[identifier] = {"status": "na_fila", "updated": time.time()}
-        POOL.submit(prepare_video, identifier)
+        JOBS[key] = {"status": "na_fila", "updated": time.time()}
+        POOL.submit(prepare_video, identifier, quality)
     return jsonify({"status": "na_fila"})
 
 
 @app.get("/api/status/<identifier>")
 def status(identifier):
     identifier = valid_id(identifier)
-    if cached_path(identifier).exists():
-        return jsonify({"status": "pronto", "video_url": "/api/video/" + identifier})
+    quality = requested_quality()
+    if quality_path(identifier, quality).is_file():
+        return jsonify({"status": "pronto", "video_url": quality_video_url(identifier, quality)})
     with LOCK:
-        job = JOBS.get(identifier)
+        job = JOBS.get(quality_job(identifier, quality))
     if not job:
         return json_error("Vídeo não iniciado", 404)
     return jsonify({key: value for key, value in job.items() if key in ("status", "message", "title")})
@@ -945,7 +1103,7 @@ def status(identifier):
 
 @app.get("/api/video/<identifier>")
 def video(identifier):
-    path = cached_path(valid_id(identifier))
+    path = quality_path(valid_id(identifier), requested_quality())
     if not path.is_file():
         return json_error("Vídeo ainda não está pronto", 404)
     # Flask/Werkzeug handles Range/206 for iOS Safari's native MP4 player.

@@ -13,6 +13,7 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
@@ -89,13 +90,16 @@ def piped_json(base: str, path: str) -> dict:
 
 def piped_video(identifier: str, work: Path) -> Path:
     """Download one public Piped progressive MP4 through its media proxy."""
+    failures = []
     for base in PIPED_INSTANCES:
+        name = urlsplit(base).hostname or "piped"
         try:
             data = piped_json(base, "/streams/" + identifier)
             duration = int(data.get("duration") or 0)
             if duration > MAX_DURATION or data.get("livestream"):
                 raise ValueError("Vídeo ao vivo ou maior que o limite permitido")
             if not duration:
+                failures.append(name + ": sem duração")
                 continue
             proxy = urlsplit(str(data.get("proxyUrl") or "")).hostname
             formats = [s for s in (data.get("videoStreams") or [])
@@ -106,6 +110,7 @@ def piped_video(identifier: str, work: Path) -> Path:
                        urlsplit(str(s.get("url"))).hostname == proxy]
             formats.sort(key=lambda item: int(item.get("height") or 0), reverse=True)
             if not formats:
+                failures.append(name + ": sem MP4 com áudio")
                 continue
             set_job(identifier, "alternativo", title=str(data.get("title") or "Vídeo")[:160])
             source = work / "piped-source.mp4"
@@ -125,10 +130,15 @@ def piped_video(identifier: str, work: Path) -> Path:
                     target.write(chunk)
             if source.stat().st_size > 0:
                 return source
-        except Exception:
-            pass
+        except HTTPError as error:
+            failures.append(name + ": HTTP " + str(error.code))
+        except (TimeoutError, URLError):
+            failures.append(name + ": erro de rede")
+        except Exception as error:
+            failures.append(name + ": " + type(error).__name__)
         (work / "piped-source.mp4").unlink(missing_ok=True)
-    raise RuntimeError("O YouTube bloqueou esta VPS e os provedores públicos alternativos não disponibilizaram este vídeo.")
+    app.logger.warning("Piped falhou para %s: %s", identifier, "; ".join(failures))
+    raise RuntimeError("YouTube e fontes alternativas indisponíveis. Detalhes: " + "; ".join(failures))
 
 
 def valid_id(value: str) -> str:
@@ -297,7 +307,7 @@ def prepare_video(identifier: str):
         set_job(identifier, "pronto")
     except Exception as error:
         # Keep the error short: do not expose subprocess commands or filesystem paths.
-        set_job(identifier, "erro", message=str(error)[:180])
+        set_job(identifier, "erro", message=str(error)[:350])
     finally:
         if work:
             shutil.rmtree(work, ignore_errors=True)

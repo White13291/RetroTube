@@ -141,7 +141,7 @@
       status.textContent = "Não foi possível preparar este vídeo: " + (data.message || "erro desconhecido");
       return;
     }
-    var labels = { na_fila: "Aguardando vaga", obtendo: "Consultando YouTube", baixando: "Obtendo o vídeo na VPS", convertendo: "Convertendo para o iPad" };
+    var labels = { na_fila: "Aguardando vaga", obtendo: "Consultando YouTube", baixando: "Obtendo o vídeo na VPS", alternativo: "Tentando fonte alternativa de vídeo", convertendo: "Convertendo para o iPad" };
     status.textContent = (labels[data.status] || "Processando") + "… Aguarde; isso pode levar alguns minutos.";
     setTimeout(function () {
       backendRequest("/api/status/" + id, function (error, latest) {

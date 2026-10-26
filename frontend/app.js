@@ -75,6 +75,7 @@
     query.value = "https://www.youtube.com/watch?v=" + id;
     title.textContent = param("t").slice(0, 160) || "Vídeo " + id;
     status.textContent = "Preparando vídeo para o Safari antigo…";
+    document.getElementById("youtube-link").className = "";
     player.removeAttribute("src");
     player.load();
     prepareVideo(id);
@@ -87,6 +88,24 @@
       prepareVideo(id);
       return false;
     };
+  }
+  function showDemo() {
+    message.className = "hide";
+    results.className = "hide";
+    watch.className = "panel";
+    title.textContent = "Teste do player do iPad (8 segundos)";
+    status.textContent = "Vídeo de teste gerado na VPS, sem acessar o YouTube. Toque em reproduzir.";
+    player.src = "/api/demo.mp4";
+    player.load();
+    document.getElementById("youtube-link").className = "hide";
+    document.getElementById("alternate-player").onclick = function (event) {
+      if (event && event.preventDefault) event.preventDefault();
+      if (event) event.returnValue = false;
+      player.load();
+      status.textContent = "Toque no botão de reprodução do vídeo.";
+      return false;
+    };
+    document.getElementById("back-to-search").href = "./";
   }
   function backendRequest(path, callback) {
     var xhr = new XMLHttpRequest();
@@ -400,7 +419,9 @@
     return false;
   };
   var id = param("v");
-  if (valid(id)) {
+  if (param("demo") === "1") {
+    showDemo();
+  } else if (valid(id)) {
     showVideo(id);
   } else if (param("q")) {
     var q = param("q").slice(0, 150);

@@ -121,11 +121,11 @@ class PublicPeerRedirects(HTTPRedirectHandler):
 PEERTUBE_OPENER = build_opener(PublicPeerRedirects())
 
 
-def peertube_json(url: str):
+def peertube_json(url: str, timeout: int = 15):
     if not peertube_public_network(url):
         raise ValueError("Servidor PeerTube não autorizado")
     req = Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "application/json"})
-    with PEERTUBE_OPENER.open(req, timeout=15) as remote:
+    with PEERTUBE_OPENER.open(req, timeout=timeout) as remote:
         length = remote.headers.get("Content-Length")
         if length and int(length) > 2_500_000:
             raise ValueError("Resposta PeerTube muito grande")
@@ -569,7 +569,26 @@ def peertube_video(identifier: str, work: Path) -> Path:
     uid = PEERTUBE_ID.fullmatch(identifier).group(1)
     original = peertube_link(identifier)
     origin = "https://" + urlsplit(original).hostname
-    details = peertube_json(origin + "/api/v1/videos/" + uid)
+    details = None
+    failures = []
+    # PeerTube's global index lists multiple independently operated servers.
+    # If an origin is slow or unreachable, a federated server may still have
+    # the video's public metadata and a media mirror URL.
+    metadata_origins = [origin]
+    if origin != "https://peertube.tv":
+        metadata_origins.append("https://peertube.tv")
+    for server in metadata_origins:
+        try:
+            candidate = peertube_json(server + "/api/v1/videos/" + uid, timeout=22)
+            if isinstance(candidate, dict) and str(candidate.get("uuid") or "").lower() == uid:
+                details = candidate
+                break
+            failures.append(urlsplit(server).hostname + ": vídeo não encontrado")
+        except (OSError, HTTPError, URLError, ValueError, TimeoutError) as error:
+            message = "tempo esgotado" if isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in str(error).lower() else type(error).__name__
+            failures.append(urlsplit(server).hostname + ": " + message)
+    if details is None:
+        raise RuntimeError("Origem PeerTube sem resposta. " + "; ".join(failures) + ". Tente outro vídeo.")
     if not isinstance(details, dict):
         raise ValueError("Metadados PeerTube inválidos")
     duration = int(details.get("duration") or 0)
@@ -608,14 +627,15 @@ def peertube_video(identifier: str, work: Path) -> Path:
     # Prefer a small file, but allow 720p/1080p when an instance only has HD.
     choices.sort(key=lambda choice: (choice[0] > 480, abs(choice[0] - 360)))
     errors = []
-    for _, url in choices[:5]:
+    # Retry the smallest preferred source once after trying alternatives.
+    for _, url in (choices[:5] + choices[:1]):
         source = work / ("peertube-source" + (".webm" if urlsplit(url).path.lower().endswith(".webm") else ".mp4"))
         try:
             if not peertube_public_network(url):
                 raise ValueError("Servidor de vídeo não autorizado")
             set_job(identifier, "baixando", title=str(details.get("name") or "Vídeo")[:160])
             req = Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "video/*"})
-            with PEERTUBE_OPENER.open(req, timeout=25) as remote:
+            with PEERTUBE_OPENER.open(req, timeout=35) as remote:
                 content_type = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 if not (content_type.startswith("video/") or content_type == "application/octet-stream"):
                     raise ValueError("Fonte não retornou um arquivo de vídeo")

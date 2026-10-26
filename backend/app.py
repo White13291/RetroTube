@@ -1,6 +1,7 @@
 """RetroTube video service. Run behind HTTPS with Gunicorn/Caddy on a VPS."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -11,7 +12,8 @@ import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
@@ -28,13 +30,105 @@ MAX_DURATION = int(os.getenv("RETROTUBE_MAX_DURATION", "1800"))
 MAX_ACTIVE_JOBS = int(os.getenv("RETROTUBE_MAX_ACTIVE_JOBS", "2"))
 MAX_QUEUE = int(os.getenv("RETROTUBE_MAX_QUEUE", "8"))
 MAX_CACHE_GB = float(os.getenv("RETROTUBE_MAX_CACHE_GB", "3"))
+MAX_SOURCE_BYTES = 250 * 1024 * 1024
 ALLOWED_ORIGIN = os.getenv("RETROTUBE_FRONTEND_ORIGIN", "https://white13291.github.io").rstrip("/")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+# Public Piped instances. Their metadata and media proxies are third-party services,
+# so they may disappear or decline requests at any time.
+PIPED_INSTANCES = (
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi-libre.kavin.rocks",
+    "https://pipedapi.adminforge.de",
+    "https://piped-api.privacy.com.de",
+)
+PIPED_PROXY_SUFFIXES = ("kavin.rocks", "adminforge.de", "privacy.com.de")
 POOL = ThreadPoolExecutor(max_workers=MAX_ACTIVE_JOBS)
 JOBS: dict[str, dict] = {}
 LOCK = threading.RLock()
 DEMO_LOCK = threading.Lock()
 REQUESTS: dict[str, deque] = defaultdict(deque)
+
+
+def approved_media_url(url: str) -> bool:
+    """Limit media fetches to vetted HTTPS proxy domains (never private IPs)."""
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        return (parts.scheme == "https" and bool(host) and
+                not parts.username and not parts.password and parts.port in (None, 443) and
+                any(host == suffix or host.endswith("." + suffix) for suffix in PIPED_PROXY_SUFFIXES))
+    except (TypeError, ValueError):
+        return False
+
+
+class ApprovedRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not approved_media_url(newurl):
+            raise ValueError("Redirecionamento externo não permitido")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+PIPED_OPENER = build_opener(ApprovedRedirects())
+
+
+def piped_json(base: str, path: str) -> dict:
+    url = base + path
+    if not approved_media_url(url):
+        raise ValueError("Instância não autorizada")
+    with PIPED_OPENER.open(Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "application/json"}), timeout=9) as remote:
+        if remote.headers.get("Content-Length") and int(remote.headers["Content-Length"]) > 2_000_000:
+            raise ValueError("Resposta de API muito grande")
+        data = remote.read(2_000_001)
+        if len(data) > 2_000_000:
+            raise ValueError("Resposta de API muito grande")
+    result = json.loads(data)
+    if not isinstance(result, dict):
+        raise ValueError("Resposta inesperada")
+    return result
+
+
+def piped_video(identifier: str, work: Path) -> Path:
+    """Download one public Piped progressive MP4 through its media proxy."""
+    for base in PIPED_INSTANCES:
+        try:
+            data = piped_json(base, "/streams/" + identifier)
+            duration = int(data.get("duration") or 0)
+            if duration > MAX_DURATION or data.get("livestream"):
+                raise ValueError("Vídeo ao vivo ou maior que o limite permitido")
+            if not duration:
+                continue
+            proxy = urlsplit(str(data.get("proxyUrl") or "")).hostname
+            formats = [s for s in (data.get("videoStreams") or [])
+                       if isinstance(s, dict) and not s.get("videoOnly") and
+                       str(s.get("mimeType") or "").startswith("video/mp4") and
+                       0 < int(s.get("height") or 0) <= 480 and
+                       approved_media_url(str(s.get("url") or "")) and
+                       urlsplit(str(s.get("url"))).hostname == proxy]
+            formats.sort(key=lambda item: int(item.get("height") or 0), reverse=True)
+            if not formats:
+                continue
+            set_job(identifier, "alternativo", title=str(data.get("title") or "Vídeo")[:160])
+            source = work / "piped-source.mp4"
+            req = Request(formats[0]["url"], headers={"User-Agent": "RetroTube/1.0"})
+            with PIPED_OPENER.open(req, timeout=20) as remote, source.open("wb") as target:
+                total = 0
+                started = time.monotonic()
+                while True:
+                    if time.monotonic() - started > 300:
+                        raise TimeoutError("O provedor alternativo demorou demais")
+                    chunk = remote.read(131072)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_SOURCE_BYTES:
+                        raise ValueError("O arquivo excede 250 MB")
+                    target.write(chunk)
+            if source.stat().st_size > 0:
+                return source
+        except Exception:
+            pass
+        (work / "piped-source.mp4").unlink(missing_ok=True)
+    raise RuntimeError("O YouTube bloqueou esta VPS e os provedores públicos alternativos não disponibilizaram este vídeo.")
 
 
 def valid_id(value: str) -> str:
@@ -122,11 +216,37 @@ def search_videos(query: str):
     return items
 
 
+def search_piped(query: str):
+    """Search result fallback when yt-dlp YouTube search is unavailable."""
+    for base in PIPED_INSTANCES:
+        try:
+            url = base + "/search?" + urlencode({"q": query, "filter": "videos"})
+            with PIPED_OPENER.open(Request(url, headers={"User-Agent": "RetroTube/1.0"}), timeout=9) as remote:
+                data = json.loads(remote.read(2_000_001))
+            items = []
+            for entry in (data.get("items", []) if isinstance(data, dict) else []):
+                if not isinstance(entry, dict) or entry.get("type") not in ("stream", None):
+                    continue
+                match = re.search(r"[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)", str(entry.get("url") or ""))
+                if not match or not entry.get("title"):
+                    continue
+                identifier = match.group(1)
+                items.append({"id": identifier, "title": str(entry["title"])[:160],
+                              "channel": str(entry.get("uploaderName") or ""),
+                              "duration": entry.get("duration") or 0,
+                              "thumbnail": "/api/thumb/" + identifier})
+                if len(items) >= 12:
+                    break
+            if items:
+                return items
+        except Exception:
+            continue
+    return []
+
+
 def prepare_video(identifier: str):
     work = None
     try:
-        if YoutubeDL is None:
-            raise RuntimeError("yt-dlp não está instalado")
         cache_cleanup()
         work = Path(tempfile.mkdtemp(prefix=identifier + "-", dir=VIDEO_DIR))
         set_job(identifier, "obtendo")
@@ -139,17 +259,26 @@ def prepare_video(identifier: str):
             "socket_timeout": 15, "retries": 2, "fragment_retries": 2,
             "max_filesize": 500 * 1024 * 1024
         }
-        with YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            duration = int(info.get("duration") or 0)
-            if not duration or duration > MAX_DURATION or info.get("is_live"):
-                raise ValueError("O vídeo é ao vivo, não possui duração conhecida ou excede o limite permitido.")
-            set_job(identifier, "baixando", title=info.get("title", "Vídeo"))
-            ydl.download([url])
-        candidates = [p for p in work.iterdir() if p.is_file() and p.suffix.lower() in (".mkv", ".mp4", ".webm", ".m4v")]
-        if not candidates:
-            raise RuntimeError("O YouTube não forneceu um arquivo reproduzível.")
-        source = max(candidates, key=lambda p: p.stat().st_size)
+        source = None
+        if YoutubeDL is not None:
+            try:
+                with YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    duration = int(info.get("duration") or 0)
+                    if not duration or duration > MAX_DURATION or info.get("is_live"):
+                        raise ValueError("O vídeo é ao vivo, não possui duração conhecida ou excede o limite permitido.")
+                    set_job(identifier, "baixando", title=info.get("title", "Vídeo"))
+                    ydl.download([url])
+                candidates = [p for p in work.iterdir() if p.is_file() and p.suffix.lower() in (".mkv", ".mp4", ".webm", ".m4v")]
+                if candidates:
+                    source = max(candidates, key=lambda p: p.stat().st_size)
+            except ValueError:
+                raise
+            except Exception:
+                source = None
+        if source is None:
+            set_job(identifier, "alternativo")
+            source = piped_video(identifier, work)
         set_job(identifier, "convertendo")
         output = work / "ready.mp4"
         command = [
@@ -190,9 +319,14 @@ def search():
     if len(query) < 2:
         return json_error("Digite pelo menos duas letras.", 400)
     try:
-        return jsonify({"items": search_videos(query)})
+        items = search_videos(query)
     except Exception:
-        return json_error("A busca no YouTube está temporariamente indisponível.", 503)
+        items = []
+    if not items:
+        items = search_piped(query)
+    if items:
+        return jsonify({"items": items})
+    return json_error("As fontes de busca estão temporariamente indisponíveis.", 503)
 
 
 @app.get("/api/prepare/<identifier>")

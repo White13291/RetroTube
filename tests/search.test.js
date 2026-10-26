@@ -14,7 +14,8 @@ function element(tag) {
     appendChild: function (child) { this.children.push(child); return child; },
     removeAttribute: function (name) { delete this[name]; },
     load: function () {},
-    focus: function () {}
+    focus: function () {},
+    setAttribute: function (name, value) { this[name] = value; }
   };
 }
 function descendants(node, tag) {
@@ -26,16 +27,20 @@ function descendants(node, tag) {
   }
   return all;
 }
-function run(search, responses, done) {
+function run(search, responses, done, hostname, storage) {
   var nodes = {};
   var ids = ["message", "results", "watch", "search-query", "player",
+    "related", "related-status", "related-cards",
     "search-source",
     "video-status", "video-title", "youtube-link", "alternate-player",
     "lite-search", "search-form", "back-to-search", "api-settings",
-    "api-key-input", "api-key-form", "api-key-status", "api-settings-link", "api-key-clear"];
+    "api-key-input", "api-key-form", "api-key-status", "api-settings-link", "api-key-clear",
+    "theme-light", "theme-dark"];
   ids.forEach(function (id) { nodes[id] = element("div"); });
   nodes["search-source"].value = "youtube";
-  var saved = {};
+  var saved = storage || {};
+  nodes.body = element("body");
+  nodes.saved = saved;
   var localStorage = {
     getItem: function (k) { return saved[k] || null; },
     setItem: function (k, v) { saved[k] = v; },
@@ -43,6 +48,7 @@ function run(search, responses, done) {
   };
   var document = {
     getElementById: function (id) { return nodes[id]; },
+    body: nodes.body,
     createElement: element,
     createTextNode: function (value) { return { tagName: "#text", textContent: String(value), children: [] }; }
   };
@@ -64,7 +70,7 @@ function run(search, responses, done) {
   FakeXHR.prototype.abort = function () {};
   vm.runInNewContext(source, {
     document: document,
-    location: { search: search, hostname: arguments.length > 3 ? arguments[3] : "" },
+    location: { search: search, hostname: hostname || "" },
     XMLHttpRequest: FakeXHR,
     localStorage: localStorage,
     setTimeout: setTimeout,
@@ -74,6 +80,35 @@ function run(search, responses, done) {
   }, { filename: "app.js" });
   setTimeout(function () { done(nodes); }, 70);
 }
+
+run("", {}, function (nodes) {
+  assert.equal(nodes.body.className, "");
+  assert.equal(nodes["theme-light"]["aria-pressed"], "true");
+  nodes["theme-dark"].onclick();
+  assert.equal(nodes.body.className, "dark");
+  assert.equal(nodes.saved.retrotube_theme, "dark");
+  assert.equal(nodes["theme-dark"]["aria-pressed"], "true");
+  run("?demo=1", {}, function (reload) {
+    assert.equal(reload.body.className, "dark");
+    reload["theme-light"].onclick();
+    assert.equal(reload.body.className, "");
+    assert.equal(reload.saved.retrotube_theme, "light");
+    console.log("OK: temas claro e escuro persistem após navegar");
+  }, "137.131.147.37", nodes.saved);
+});
+
+run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil&source=peertube&t=Hino", {
+  backend: {items: [
+    {id: "peertube_da880324-5efa-4ff0-8767-7697503bc746", title: "Hino atual", channel: "Canal BR"},
+    {id: "peertube_fbcf43ff-0706-4634-a9d2-ff70b2763f92", title: "Brasil em vídeo", channel: "Outro canal", thumbnail: "/api/thumb/peertube_fbcf43ff-0706-4634-a9d2-ff70b2763f92"}
+  ]}
+}, function (nodes) {
+  assert.equal(nodes.related.className, "panel");
+  assert.equal(descendants(nodes["related-cards"], "a").length, 2);
+  assert(descendants(nodes["related-cards"], "a")[0].href.indexOf("?v=peertube_fbcf43ff-0706-4634-a9d2-ff70b2763f92") === 0);
+  assert.equal(nodes["related-status"].textContent, "Mais vídeos sobre este assunto");
+  console.log("OK: vídeos relacionados abaixo do player, sem repetir o atual");
+}, "137.131.147.37");
 
 run("?q=criacao", {
   piped: {

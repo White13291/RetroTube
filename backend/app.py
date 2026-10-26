@@ -33,6 +33,7 @@ VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 POOL = ThreadPoolExecutor(max_workers=MAX_ACTIVE_JOBS)
 JOBS: dict[str, dict] = {}
 LOCK = threading.RLock()
+DEMO_LOCK = threading.Lock()
 REQUESTS: dict[str, deque] = defaultdict(deque)
 
 
@@ -231,6 +232,36 @@ def video(identifier):
         return json_error("Vídeo ainda não está pronto", 404)
     # Flask/Werkzeug handles Range/206 for iOS Safari's native MP4 player.
     return send_file(path, mimetype="video/mp4", conditional=True, max_age=86400)
+
+
+@app.get("/api/demo.mp4")
+def demo_video():
+    """Tiny local H.264/AAC clip to test Safari without contacting YouTube."""
+    path = VIDEO_DIR / "retrotube-demo.mp4"
+    with DEMO_LOCK:
+        if not path.is_file() or path.stat().st_size == 0:
+            if not shutil.which("ffmpeg"):
+                return json_error("FFmpeg indisponível na VPS.", 503)
+            work = VIDEO_DIR / "retrotube-demo-building.mp4"
+            command = [
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc=size=320x180:rate=24",
+                "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+                "-t", "8", "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
+                "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "3.0",
+                "-c:a", "aac", "-b:a", "64k", "-ac", "1",
+                "-movflags", "+faststart", str(work)
+            ]
+            try:
+                result = subprocess.run(command, capture_output=True, timeout=60)
+                if result.returncode != 0 or not work.exists() or work.stat().st_size == 0:
+                    return json_error("Não foi possível gerar o vídeo de teste.", 503)
+                os.replace(work, path)
+            except (OSError, subprocess.TimeoutExpired):
+                return json_error("Falha ao gerar o vídeo de teste.", 503)
+            finally:
+                work.unlink(missing_ok=True)
+    return send_file(path, mimetype="video/mp4", conditional=True, max_age=3600)
 
 
 @app.get("/api/thumb/<identifier>")

@@ -1,8 +1,10 @@
 # RetroTube — Safari iOS 8.3 com VPS
 
-O RetroTube agora pode ser executado na VPS Ubuntu Server. Nesse modo, a VPS serve o site, pesquisa vídeos e tenta prepará-los como **MP4 (H.264 baseline + AAC)**. A conversão ocorre **na VPS**, e o iPad assiste pelo player nativo HTML5. Nenhum arquivo precisa ser baixado manualmente no iPad.
+O RetroTube pode ser executado na VPS Ubuntu Server. A VPS serve o site, pesquisa vídeos e tenta prepará-los como **MP4 (H.264 baseline + AAC)**. A conversão ocorre **na VPS**, e o iPad assiste pelo player nativo HTML5. Nenhum arquivo precisa ser baixado manualmente no iPad.
 
-Se o YouTube solicitar confirmação de robô à Oracle, o backend **tenta automaticamente instâncias públicas do Invidious** (incluindo `inv.nadeko.net`) para pesquisa e obtenção de MP4 progressivo pelo proxy de vídeo do próprio Invidious (`/latest_version?local=true`). Caso todas falhem, tenta o Piped. São serviços de terceiros e podem ficar indisponíveis, impor limites ou bloquear solicitações da VPS; não há garantia de reprodução de todos os vídeos. Não é preciso inserir cookies nem credenciais do Google no servidor.
+**Fonte padrão: Dailymotion.** A pesquisa e a obtenção dos vídeos utilizam o extrator do `yt-dlp`, que já vem instalado no contêiner. **Não precisa de chave de API, login nem configurar outro serviço.** Também é possível colar links `dailymotion.com/video/...` ou `dai.ly/...` diretamente. A disponibilidade real depende da rede da VPS e das restrições do Dailymotion.
+
+**YouTube (experimental):** a busca continua disponível como fonte opcional. Se o YouTube solicitar confirmação de robô à Oracle, o backend tenta instâncias públicas do Invidious e depois o Piped. Essas fontes frequentemente bloqueiam IPs de VPS ou falham; o Dailymotion é uma fonte independente e não recupera o catálogo do YouTube.
 
 > Solução experimental: o YouTube pode bloquear ferramentas de extração e a reprodução real precisa ser testada no dispositivo. Respeite os direitos e termos do serviço de origem.
 
@@ -38,15 +40,16 @@ sudo bash install-vps.sh
 2. Libere **TCP 8080** no painel do provedor e, se UFW estiver ativo, `sudo ufw allow 8080/tcp`.
 3. Confira os logs com `sudo docker compose logs --tail=80 retrotube` (ou `sudo docker-compose logs --tail=80 retrotube`).
 4. Se a porta 8080 estiver ocupada, use `sudo env RETROTUBE_PORT=8081 bash install-vps.sh` e libere a porta 8081.
-5. Se um vídeo falhar, veja os logs: o YouTube pode bloquear consultas provenientes de IPs de datacenters.
-6. Se a mensagem disser que as fontes alternativas estão indisponíveis, teste o Invidious na **própria VPS**:
+5. Se um vídeo falhar, veja os logs: tanto YouTube quanto Dailymotion podem restringir consultas provenientes de IPs de datacenters.
+6. Teste a busca do Dailymotion sem chave de API: `curl -G --data-urlencode 'q=noticias brasil' --data-urlencode 'source=dailymotion' http://127.0.0.1:8080/api/search`. Se estiver usando porta 8081, substitua 8080. Uma resposta com `"items"` confirma que a busca funciona, mas a reprodução ainda precisa ser testada separadamente.
+7. Se a mensagem disser que as fontes alternativas do YouTube estão indisponíveis, teste o Invidious na **própria VPS**:
 
    ```bash
    curl -i --max-time 20 'https://inv.nadeko.net/api/v1/videos/eWNhOwEIdRk?region=BR'
    ```
 
    Uma resposta JSON com `formatStreams` indica que o endpoint de metadados funciona; HTTP 403, 429, 500, 502 ou 503 indica bloqueio ou indisponibilidade, e o RetroTube tentará outras instâncias. Este teste **não garante** que o proxy de MP4 também esteja acessível.
-7. Para verificar a conversão de um vídeo específico, acesse `http://127.0.0.1:8080/api/prepare/eWNhOwEIdRk` e depois `http://127.0.0.1:8080/api/status/eWNhOwEIdRk` na VPS. Se estiver usando porta `8081`, substitua `8080` nos comandos.
+8. Para verificar a conversão de um vídeo do YouTube específico, acesse `http://127.0.0.1:8080/api/prepare/eWNhOwEIdRk` e depois `http://127.0.0.1:8080/api/status/eWNhOwEIdRk` na VPS. Para Dailymotion, use o identificador `dailymotion_` seguido do ID do vídeo, como `dailymotion_x5kesuj`. Se estiver usando porta `8081`, substitua `8080` nos comandos.
 
 ## Atualizar
 

@@ -147,3 +147,21 @@ run("?q=noticias&source=dailymotion", {backend: {items: [
   assert.equal(descendants(nodes.results, "img")[0].src, "https://s1.dmcdn.net/v/test");
   console.log("OK: busca Dailymotion na VPS");
 }, "137.131.147.37");
+
+run("?q=brasil&source=peertube", {backend: {items: [
+  {id: "peertube_da880324-5efa-4ff0-8767-7697503bc746",
+   title: "Hino Nacional Brasileiro", channel: "Canal BR",
+   thumbnail: "https://tube.tchncs.de/lazy-static/thumbnails/demo.jpg",
+   original_url: "https://tube.tchncs.de/videos/watch/da880324-5efa-4ff0-8767-7697503bc746"}
+]}}, function (nodes) {
+  var links = descendants(nodes.results, "a");
+  assert.equal(links.length, 2);
+  assert(links[0].href.indexOf("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil&source=peertube") === 0);
+  assert(links[0].href.indexOf("&u=https%3A%2F%2Ftube.tchncs.de") !== -1);
+  run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&source=peertube&u=" +
+    encodeURIComponent("https://tube.tchncs.de/videos/watch/da880324-5efa-4ff0-8767-7697503bc746"), {}, function (watchNodes) {
+    assert.equal(watchNodes.watch.className, "panel");
+    assert.equal(watchNodes["youtube-link"].textContent, "Abrir no PeerTube");
+    console.log("OK: busca PeerTube sem API e player na VPS");
+  });
+}, "137.131.147.37");

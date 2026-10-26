@@ -24,13 +24,17 @@
   ];
 
   function valid(id) {
-    return /^(?:[A-Za-z0-9_-]{11}|dailymotion_[A-Za-z0-9]{5,14})$/.test(id || "");
+    return /^(?:[A-Za-z0-9_-]{11}|dailymotion_[A-Za-z0-9]{5,14}|peertube_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(id || "");
   }
   function isDailymotion(id) {
     return /^dailymotion_[A-Za-z0-9]{5,14}$/.test(id || "");
   }
+  function isPeerTube(id) {
+    return /^peertube_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id || "");
+  }
   function selectedSource() {
-    return sourceSelect.value === "youtube" ? "youtube" : "dailymotion";
+    if (sourceSelect.value === "youtube" || sourceSelect.value === "dailymotion") return sourceSelect.value;
+    return "peertube";
   }
   function getKey() {
     if (memoryKey) return memoryKey;
@@ -88,18 +92,21 @@
     results.className = "hide";
     watch.className = "panel";
     var daily = isDailymotion(id);
-    query.value = daily ? "https://www.dailymotion.com/video/" + id.slice(12) : "https://www.youtube.com/watch?v=" + id;
+    var peer = isPeerTube(id);
+    var original = param("u");
+    if (!/^https:\/\/[a-z0-9.-]+\//i.test(original)) original = "";
+    query.value = peer ? (original || id) : daily ? "https://www.dailymotion.com/video/" + id.slice(12) : "https://www.youtube.com/watch?v=" + id;
     title.textContent = param("t").slice(0, 160) || "Vídeo " + id;
     status.textContent = "Preparando vídeo para o Safari antigo…";
-    document.getElementById("youtube-link").className = "";
+    document.getElementById("youtube-link").className = peer && !original ? "hide" : "";
     player.removeAttribute("src");
     player.load();
     prepareVideo(id);
-    document.getElementById("youtube-link").href = daily ?
+    document.getElementById("youtube-link").href = peer ? original : daily ?
       "https://www.dailymotion.com/video/" + id.slice(12) : "https://m.youtube.com/watch?v=" + id;
-    document.getElementById("youtube-link").textContent = daily ? "Abrir no Dailymotion" : "Abrir no YouTube";
+    document.getElementById("youtube-link").textContent = peer ? "Abrir no PeerTube" : daily ? "Abrir no Dailymotion" : "Abrir no YouTube";
     document.getElementById("back-to-search").href = param("q") ?
-      "?q=" + encodeURIComponent(param("q")) + "&source=" + encodeURIComponent(param("source") || (daily ? "dailymotion" : "youtube")) : "./";
+      "?q=" + encodeURIComponent(param("q")) + "&source=" + encodeURIComponent(param("source") || (peer ? "peertube" : daily ? "dailymotion" : "youtube")) : "./";
     document.getElementById("alternate-player").onclick = function (event) {
       if (event && event.preventDefault) event.preventDefault();
       if (event) event.returnValue = false;
@@ -159,7 +166,7 @@
       status.textContent = "Não foi possível preparar este vídeo: " + (data.message || "erro desconhecido");
       return;
     }
-    var labels = { na_fila: "Aguardando vaga", obtendo: "Consultando YouTube", baixando: "Obtendo o vídeo na VPS", alternativo: "Tentando Invidious e outras fontes de vídeo", convertendo: "Convertendo para o iPad" };
+    var labels = { na_fila: "Aguardando vaga", obtendo: "Consultando fonte de vídeo", baixando: "Obtendo o vídeo na VPS", alternativo: "Tentando outras fontes de vídeo", convertendo: "Convertendo para o iPad" };
     status.textContent = (labels[data.status] || "Processando") + "… Aguarde; isso pode levar alguns minutos.";
     setTimeout(function () {
       backendRequest("/api/status/" + id, function (error, latest) {
@@ -210,10 +217,14 @@
     link.href = "?v=" + encodeURIComponent(video.id) +
       "&q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(source || "youtube") +
       "&t=" + encodeURIComponent(video.title.slice(0, 160));
+    if (isPeerTube(video.id) && /^https:\/\/[a-z0-9.-]+\//i.test(video.original_url || "")) {
+      link.href += "&u=" + encodeURIComponent(video.original_url);
+    }
     var thumb = document.createElement("img");
     thumb.className = "thumb";
-    thumb.src = video.thumbnail || (isDailymotion(video.id) ? "logo.png" :
+    thumb.src = video.thumbnail || ((isDailymotion(video.id) || isPeerTube(video.id)) ? "logo.png" :
       "https://i.ytimg.com/vi/" + video.id + "/mqdefault.jpg");
+    thumb.onerror = function () { this.onerror = null; this.src = "logo.png"; };
     thumb.alt = "Assistir: " + video.title.slice(0, 100);
     thumb.width = 155;
     thumb.height = 87;
@@ -333,7 +344,7 @@
     results.className = "panel";
     query.value = q;
     var source = param("source") || selectedSource();
-    if (source !== "youtube") source = "dailymotion";
+    if (source !== "youtube" && source !== "dailymotion") source = "peertube";
     sourceSelect.value = source;
     results.innerHTML = "";
     textNode(results, "h1", "Resultados para: " + q);
@@ -355,8 +366,8 @@
       });
       return;
     }
-    if (source === "dailymotion") {
-      progress.textContent = "A busca do Dailymotion funciona pelo endereço da sua VPS. Abra o RetroTube na VPS para pesquisar.";
+    if (source !== "youtube") {
+      progress.textContent = "A busca do " + (source === "peertube" ? "PeerTube" : "Dailymotion") + " funciona pelo endereço da sua VPS. Abra o RetroTube na VPS para pesquisar.";
       return;
     }
     var key = getKey();

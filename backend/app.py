@@ -43,6 +43,16 @@ PIPED_INSTANCES = (
     "https://piped-api.privacy.com.de",
 )
 PIPED_PROXY_SUFFIXES = ("kavin.rocks", "adminforge.de", "privacy.com.de")
+# Invidious serves public video metadata and can proxy an MP4 via
+# /latest_version?local=true. Keep endpoints fixed: clients may only send IDs.
+# Only instances published by the Invidious project are used.
+INVIDIOUS_INSTANCES = (
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://yt.chocolatemoo53.com",
+    "https://invidious.tiekoetter.com",
+)
+INVIDIOUS_MEDIA_HOSTS = tuple(urlsplit(base).hostname for base in INVIDIOUS_INSTANCES)
 POOL = ThreadPoolExecutor(max_workers=MAX_ACTIVE_JOBS)
 JOBS: dict[str, dict] = {}
 LOCK = threading.RLock()
@@ -57,7 +67,8 @@ def approved_media_url(url: str) -> bool:
         host = (parts.hostname or "").lower()
         return (parts.scheme == "https" and bool(host) and
                 not parts.username and not parts.password and parts.port in (None, 443) and
-                any(host == suffix or host.endswith("." + suffix) for suffix in PIPED_PROXY_SUFFIXES))
+                (host in INVIDIOUS_MEDIA_HOSTS or
+                 any(host == suffix or host.endswith("." + suffix) for suffix in PIPED_PROXY_SUFFIXES)))
     except (TypeError, ValueError):
         return False
 
@@ -70,6 +81,122 @@ class ApprovedRedirects(HTTPRedirectHandler):
 
 
 PIPED_OPENER = build_opener(ApprovedRedirects())
+
+
+def invidious_json(base: str, path: str):
+    """Read a small JSON response only from our allowlisted Invidious instances."""
+    if base not in INVIDIOUS_INSTANCES:
+        raise ValueError("Instância Invidious não autorizada")
+    url = base + path
+    if not approved_media_url(url):
+        raise ValueError("URL não autorizada")
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 RetroTube/1.0", "Accept": "application/json"})
+    with PIPED_OPENER.open(req, timeout=15) as remote:
+        size = remote.headers.get("Content-Length")
+        if size and int(size) > 2_000_000:
+            raise ValueError("Resposta da API muito grande")
+        raw = remote.read(2_000_001)
+    if len(raw) > 2_000_000:
+        raise ValueError("Resposta da API muito grande")
+    return json.loads(raw)
+
+
+def invidious_video(identifier: str, work: Path) -> Path:
+    """Obtain a progressive MP4 via a public Invidious instance's local proxy."""
+    failures = []
+    for base in INVIDIOUS_INSTANCES:
+        host = urlsplit(base).hostname or "invidious"
+        source = work / "invidious-source.mp4"
+        try:
+            data = invidious_json(base, "/api/v1/videos/" + identifier + "?region=BR")
+            if not isinstance(data, dict):
+                raise ValueError("Metadados inválidos")
+            duration = int(data.get("lengthSeconds") or 0)
+            if duration <= 0 or duration > MAX_DURATION or data.get("liveNow"):
+                raise ValueError("Vídeo ao vivo, sem duração ou muito longo")
+            # An itag 18 progressive MP4 includes H.264 video and AAC audio.
+            # Other progressive MP4s are usable after FFmpeg's iOS 8 conversion.
+            choices = []
+            for item in data.get("formatStreams") or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    itag = int(item.get("itag") or 0)
+                    quality = int(re.search(r"\d+", str(item.get("qualityLabel") or "360p")).group())
+                except (TypeError, ValueError, AttributeError):
+                    continue
+                if 0 < itag < 1000 and 0 < quality <= 480 and (
+                    "mp4" in str(item.get("type") or "").lower() or
+                    str(item.get("container") or "").lower() == "mp4"
+                ):
+                    choices.append((quality, itag))
+            if not choices:
+                raise ValueError("Sem MP4 progressivo com áudio até 480p")
+            choices.sort(reverse=True)
+            set_job(identifier, "alternativo", title=str(data.get("title") or "Vídeo")[:160])
+            # 'local=true' keeps the media request on the Invidious video proxy.
+            url = base + "/latest_version?" + urlencode({
+                "id": identifier, "itag": choices[0][1], "local": "true"
+            })
+            with PIPED_OPENER.open(Request(url, headers={"User-Agent": "Mozilla/5.0 RetroTube/1.0"}), timeout=25) as remote:
+                mime = str(remote.headers.get("Content-Type") or "").split(";")[0].lower().strip()
+                if mime not in ("video/mp4", "application/octet-stream", "binary/octet-stream"):
+                    raise ValueError("O provedor não devolveu um vídeo MP4")
+                if remote.headers.get("Content-Length") and int(remote.headers["Content-Length"]) > MAX_SOURCE_BYTES:
+                    raise ValueError("Arquivo excede 250 MB")
+                total = 0
+                started = time.monotonic()
+                with source.open("wb") as target:
+                    while True:
+                        if time.monotonic() - started > 300:
+                            raise TimeoutError("O provedor demorou demais")
+                        chunk = remote.read(131072)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > MAX_SOURCE_BYTES:
+                            raise ValueError("Arquivo excede 250 MB")
+                        target.write(chunk)
+            if source.stat().st_size:
+                return source
+            raise ValueError("Vídeo vazio")
+        except HTTPError as error:
+            failures.append(host + ": HTTP " + str(error.code))
+        except (TimeoutError, URLError):
+            failures.append(host + ": erro de rede")
+        except Exception as error:
+            failures.append(host + ": " + str(error)[:90])
+        source.unlink(missing_ok=True)
+    raise RuntimeError("Invidious indisponível. " + "; ".join(failures))
+
+
+def search_invidious(query: str):
+    """Search YouTube's index through Invidious when the direct path fails."""
+    for base in INVIDIOUS_INSTANCES:
+        try:
+            entries = invidious_json(base, "/api/v1/search?" + urlencode({
+                "q": query, "type": "video", "region": "BR"
+            }))
+            if not isinstance(entries, list):
+                continue
+            items = []
+            for entry in entries:
+                if not isinstance(entry, dict) or entry.get("type") != "video":
+                    continue
+                identifier = str(entry.get("videoId") or "")
+                if not VIDEO_ID.fullmatch(identifier) or not entry.get("title"):
+                    continue
+                items.append({"id": identifier, "title": str(entry["title"])[:160],
+                              "channel": str(entry.get("author") or ""),
+                              "duration": entry.get("lengthSeconds") or 0,
+                              "thumbnail": "/api/thumb/" + identifier})
+                if len(items) >= 12:
+                    break
+            if items:
+                return items
+        except Exception as error:
+            app.logger.warning("Busca Invidious falhou: %s", type(error).__name__)
+    return []
 
 
 def piped_json(base: str, path: str) -> dict:
@@ -288,7 +415,13 @@ def prepare_video(identifier: str):
                 source = None
         if source is None:
             set_job(identifier, "alternativo")
-            source = piped_video(identifier, work)
+            try:
+                source = invidious_video(identifier, work)
+            except RuntimeError as invidious_error:
+                try:
+                    source = piped_video(identifier, work)
+                except RuntimeError as piped_error:
+                    raise RuntimeError(str(invidious_error) + " | " + str(piped_error)) from piped_error
         set_job(identifier, "convertendo")
         output = work / "ready.mp4"
         command = [
@@ -332,6 +465,8 @@ def search():
         items = search_videos(query)
     except Exception:
         items = []
+    if not items:
+        items = search_invidious(query)
     if not items:
         items = search_piped(query)
     if items:

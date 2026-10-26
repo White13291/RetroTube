@@ -40,7 +40,7 @@ DAILYMOTION_ID = re.compile(r"^dailymotion_([A-Za-z0-9]{5,14})$")
 PEERTUBE_ID = re.compile(r"^peertube_([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$")
 PEERTUBE_SEARCH = ("https://search.joinpeertube.org", "https://peertube.tv")
 PEERTUBE_INDEX = VIDEO_DIR / "peertube-index.json"
-VIDEO_QUALITIES = (360, 480, 720)
+VIDEO_QUALITIES = (360, 480, 720, 1080)
 # Public Piped instances. Their metadata and media proxies are third-party services,
 # so they may disappear or decline requests at any time.
 PIPED_INSTANCES = (
@@ -465,7 +465,7 @@ def quality_job(identifier: str, quality: int) -> str:
 
 def requested_quality() -> int:
     raw = request.args.get("quality", "360")
-    if raw not in ("360", "480", "720"):
+    if raw not in ("360", "480", "720", "1080"):
         abort(400, "Qualidade inválida")
     return int(raw)
 
@@ -590,8 +590,15 @@ def peertube_file_choices(details: dict):
                 if (height, file_url) not in choices:
                     choices.append((height, file_url))
     choices.sort(key=lambda choice: (choice[0] > 480, abs(choice[0] - 360)))
-    # Keep higher resolutions too; they are used only if verified on the watch page.
-    return choices[:24]
+    # Preserve higher sizes even when many low-res URLs fill the first page.
+    selected = choices[:24]
+    for target in (720, 1080):
+        for source in (choice for choice in choices if choice[0] >= target):
+            if source not in selected:
+                selected.append(source)
+            if sum(1 for height, _ in selected if height >= target) >= 3:
+                break
+    return selected[:30]
 
 
 def peertube_media_alive(url: str, timeout: int = 5) -> bool:
@@ -650,7 +657,7 @@ def peertube_check_search_item(item: dict):
 
 
 def search_peertube(query: str):
-    """Search publicly indexed PeerTube videos without API keys or logins."""
+    """Search PeerTube without hiding results that lack particular resolutions."""
     failures = []
     for base in PEERTUBE_SEARCH:
         try:
@@ -705,25 +712,29 @@ def search_peertube(query: str):
                 if len(items) >= 16:
                     break
             if items:
+                # Origin health and available resolutions are independent from
+                # search visibility. Prioritize verified media, but preserve the
+                # other valid catalog entries so 240p-only videos do not vanish.
                 with ThreadPoolExecutor(max_workers=8) as workers:
                     checks = list(workers.map(peertube_check_search_item, items))
                 verified = []
-                verified_links = {}
+                unchecked = []
+                catalog_links = {}
                 for item, check in zip(items, checks):
+                    identifier = item["id"]
                     if check:
-                        identifier = item["id"]
                         verified.append(item)
-                        verified_links[identifier] = {**links[identifier], **check}
-                    if len(verified) >= 12:
-                        break
-                if verified:
-                    remember_peertube_videos(verified_links)
-                    return verified
-            failures.append(urlsplit(base).hostname + ": sem vídeos com origem acessível")
+                        catalog_links[identifier] = {**links[identifier], **check}
+                    else:
+                        unchecked.append(item)
+                        catalog_links[identifier] = links[identifier]
+                remember_peertube_videos(catalog_links)
+                return verified + unchecked
+            failures.append(urlsplit(base).hostname + ": sem vídeos no índice")
         except Exception as error:
             app.logger.warning("Busca PeerTube %s falhou: %s", base, str(error)[:150])
             failures.append(urlsplit(base).hostname + ": indisponível")
-    raise RuntimeError("PeerTube não retornou vídeos reproduzíveis. " + "; ".join(failures))
+    raise RuntimeError("PeerTube não retornou resultados. " + "; ".join(failures))
 
 
 def peertube_video_details(identifier: str) -> dict:
@@ -942,7 +953,8 @@ def prepare_video(identifier: str, quality: int = 360):
             # iOS 8 hardware decoders are happier with 30 fps H.264 baseline.
             "-vf", f"scale=-2:{quality},fps=30",
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27",
-            "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "3.1" if quality == 720 else "3.0",
+            "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level",
+            "4.0" if quality == 1080 else "3.1" if quality == 720 else "3.0",
             "-c:a", "aac", "-b:a", "96k", "-ac", "2",
             "-movflags", "+faststart", str(output)
         ]

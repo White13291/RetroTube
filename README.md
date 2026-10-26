@@ -6,6 +6,8 @@ O RetroTube pode ser executado na VPS Ubuntu Server. A VPS serve o site, pesquis
 
 Para reduzir os resultados que falham ao reproduzir, a busca verifica um pequeno trecho dos arquivos de mídia antes de exibi-los e experimenta `fileDownloadUrl` quando `fileUrl` não funciona. Isso pode tornar a pesquisa mais lenta e ocultar vídeos de servidores instáveis, mas evita oferecer arquivos que já respondem HTTP 404. A verificação não garante que a transferência completa funcionará.
 
+**Qualidade de reprodução:** ao lado de **Testar reprodutor**, o player apresenta um seletor com **360p, 480p e 720p** somente para resoluções que a origem oferece com altura suficiente. No PeerTube, cada tamanho é verificado com uma pequena leitura da mídia; uma fonte de 720p também permite gerar 480p e 360p sem ampliação artificial. Fontes externas podem bloquear a consulta ou o download; nesses casos a qualidade poderá ficar indisponível. O vídeo começa em 360p (mantendo compatibilidade com o cache anterior) e, ao escolher outro tamanho, a VPS gera uma versão MP4 H.264/AAC separada. 720p usa H.264 Baseline nível 3.1, mas **a reprodução em iPads antigos precisa ser testada**. Resoluções maiores exigem mais tempo, processamento e armazenamento.
+
 **Dailymotion (experimental):** o extrator de pesquisa do `yt-dlp` foi testado na Oracle e retornou zero vídeos; por isso não é mais a fonte padrão. **YouTube (experimental):** pode solicitar confirmação de robô à Oracle. Nesses casos o backend tenta Invidious e Piped, que também vêm apresentando erros HTTP. PeerTube tem um catálogo independente e não oferece todo o catálogo do YouTube.
 
 > Solução experimental: o YouTube pode bloquear ferramentas de extração e a reprodução real precisa ser testada no dispositivo. Respeite os direitos e termos do serviço de origem.
@@ -53,6 +55,7 @@ curl -G --max-time 40 --data-urlencode 'q=brasil' --data-urlencode 'source=peert
 
    Uma resposta JSON com `formatStreams` indica que o endpoint de metadados funciona; HTTP 403, 429, 500, 502 ou 503 indica bloqueio ou indisponibilidade, e o RetroTube tentará outras instâncias. Este teste **não garante** que o proxy de MP4 também esteja acessível.
 8. Para verificar a conversão de um resultado PeerTube, pesquise antes no site e copie seu identificador `peertube_UUID`. Consulte `http://127.0.0.1:8081/api/prepare/peertube_UUID` e depois `/api/status/peertube_UUID`. Para YouTube, use o identificador simples de 11 caracteres; para Dailymotion, `dailymotion_` seguido do ID.
+9. Para conferir as qualidades verificadas, acesse `/api/qualities/peertube_UUID`. Para solicitar 720p, use `/api/prepare/peertube_UUID?quality=720`, acompanhe `/api/status/peertube_UUID?quality=720` e reproduza `/api/video/peertube_UUID?quality=720`. Os valores aceitos são `360`, `480` e `720`; arquivos 480p e 720p não substituem a versão 360p.
 
 ## Atualizar
 

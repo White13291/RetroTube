@@ -186,6 +186,34 @@ def peertube_thumbnail_link(identifier: str) -> str:
     return link if peertube_public_url(link) else ""
 
 
+def peertube_cached_sources(identifier: str):
+    """Use recently verified media URLs, avoiding a second slow origin API call."""
+    with LOCK:
+        try:
+            entries = json.loads(PEERTUBE_INDEX.read_text(encoding="utf-8"))
+            entry = entries.get(identifier, {}) if isinstance(entries, dict) else {}
+        except (OSError, ValueError):
+            return None
+    if not isinstance(entry, dict) or time.time() - float(entry.get("checked", 0) or 0) > 1200:
+        return None
+    sources = []
+    for item in (entry.get("sources") or [])[:5]:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "")
+        if not peertube_public_url(url):
+            continue
+        try:
+            height = int(item.get("height") or 0)
+        except (ValueError, TypeError):
+            continue
+        if 0 < height <= 1080:
+            sources.append((height, url))
+    if not sources:
+        return None
+    return {"choices": sources, "title": str(entry.get("name") or "Vídeo")[:160]}
+
+
 class ApprovedRedirects(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not approved_media_url(newurl):
@@ -499,6 +527,59 @@ def search_dailymotion(query: str):
     return items
 
 
+def peertube_file_choices(details: dict):
+    """Return reasonably sized public PeerTube MP4/WebM sources."""
+    choices = []
+    video_lists = [details.get("files") or []]
+    for playlist in details.get("streamingPlaylists") or []:
+        if isinstance(playlist, dict):
+            video_lists.append(playlist.get("files") or [])
+    for files in video_lists:
+        for entry in files:
+            if not isinstance(entry, dict):
+                continue
+            file_url = str(entry.get("fileUrl") or "")
+            if not peertube_public_url(file_url):
+                continue
+            try:
+                height = int((entry.get("resolution") or {}).get("id") or 0)
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if not 0 < height <= 1080:
+                continue
+            file_path = urlsplit(file_url).path.lower()
+            if not (file_path.endswith(".mp4") or file_path.endswith(".webm")):
+                continue
+            try:
+                size = int(entry.get("size") or 0)
+            except (ValueError, TypeError):
+                size = 0
+            if size > MAX_SOURCE_BYTES:
+                continue
+            choices.append((height, file_url))
+    choices.sort(key=lambda choice: (choice[0] > 480, abs(choice[0] - 360)))
+    return choices[:5]
+
+
+def peertube_check_search_item(item: dict):
+    """Quickly reject dead PeerTube origins before offering videos to the iPad."""
+    uid = item["id"][len("peertube_"):]
+    origin = "https://" + urlsplit(item["original_url"]).hostname
+    try:
+        details = peertube_json(origin + "/api/v1/videos/" + uid, timeout=6)
+        if not isinstance(details, dict) or str(details.get("uuid") or "").lower() != uid:
+            return None
+        if details.get("isLive") or int(details.get("duration") or 0) not in range(1, MAX_DURATION + 1):
+            return None
+        choices = peertube_file_choices(details)
+        if not choices:
+            return None
+        return {"sources": [{"height": h, "url": u} for h, u in choices],
+                "name": str(details.get("name") or item["title"])[:160], "checked": time.time()}
+    except Exception:
+        return None
+
+
 def search_peertube(query: str):
     """Search publicly indexed PeerTube videos without API keys or logins."""
     failures = []
@@ -552,12 +633,24 @@ def search_peertube(query: str):
                     "original_url": canonical,
                 })
                 links[identifier] = {"url": canonical, "thumbnail": thumbnail}
-                if len(items) >= 12:
+                if len(items) >= 16:
                     break
             if items:
-                remember_peertube_videos(links)
-                return items
-            failures.append(urlsplit(base).hostname + ": sem vídeos compatíveis")
+                with ThreadPoolExecutor(max_workers=8) as workers:
+                    checks = list(workers.map(peertube_check_search_item, items))
+                verified = []
+                verified_links = {}
+                for item, check in zip(items, checks):
+                    if check:
+                        identifier = item["id"]
+                        verified.append(item)
+                        verified_links[identifier] = {**links[identifier], **check}
+                    if len(verified) >= 12:
+                        break
+                if verified:
+                    remember_peertube_videos(verified_links)
+                    return verified
+            failures.append(urlsplit(base).hostname + ": sem vídeos com origem acessível")
         except Exception as error:
             app.logger.warning("Busca PeerTube %s falhou: %s", base, str(error)[:150])
             failures.append(urlsplit(base).hostname + ": indisponível")
@@ -569,63 +662,37 @@ def peertube_video(identifier: str, work: Path) -> Path:
     uid = PEERTUBE_ID.fullmatch(identifier).group(1)
     original = peertube_link(identifier)
     origin = "https://" + urlsplit(original).hostname
-    details = None
-    failures = []
-    # PeerTube's global index lists multiple independently operated servers.
-    # If an origin is slow or unreachable, a federated server may still have
-    # the video's public metadata and a media mirror URL.
-    metadata_origins = [origin]
-    if origin != "https://peertube.tv":
-        metadata_origins.append("https://peertube.tv")
-    for server in metadata_origins:
-        try:
-            candidate = peertube_json(server + "/api/v1/videos/" + uid, timeout=22)
-            if isinstance(candidate, dict) and str(candidate.get("uuid") or "").lower() == uid:
-                details = candidate
-                break
-            failures.append(urlsplit(server).hostname + ": vídeo não encontrado")
-        except (OSError, HTTPError, URLError, ValueError, TimeoutError) as error:
-            message = "tempo esgotado" if isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in str(error).lower() else type(error).__name__
-            failures.append(urlsplit(server).hostname + ": " + message)
-    if details is None:
-        raise RuntimeError("Origem PeerTube sem resposta. " + "; ".join(failures) + ". Tente outro vídeo.")
-    if not isinstance(details, dict):
-        raise ValueError("Metadados PeerTube inválidos")
-    duration = int(details.get("duration") or 0)
-    if not 0 < duration <= MAX_DURATION or details.get("isLive"):
-        raise ValueError("Vídeo sem duração conhecida, ao vivo ou longo demais")
-    choices = []
-    video_lists = [details.get("files") or []]
-    for playlist in details.get("streamingPlaylists") or []:
-        if isinstance(playlist, dict):
-            video_lists.append(playlist.get("files") or [])
-    for files in video_lists:
-        for entry in files:
-            if not isinstance(entry, dict):
-                continue
-            file_url = str(entry.get("fileUrl") or "")
-            if not peertube_public_url(file_url):
-                continue
+    cached = peertube_cached_sources(identifier)
+    if cached:
+        choices = cached["choices"]
+        video_title = cached["title"]
+    else:
+        details = None
+        failures = []
+        # PeerTube's global index lists independently operated servers.
+        # A federated instance sometimes has a copy of a video's metadata.
+        metadata_origins = [origin]
+        if origin != "https://peertube.tv":
+            metadata_origins.append("https://peertube.tv")
+        for server in metadata_origins:
             try:
-                height = int((entry.get("resolution") or {}).get("id") or 0)
-            except (ValueError, TypeError, AttributeError):
-                continue
-            if not 0 < height <= 1080:
-                continue
-            file_path = urlsplit(file_url).path.lower()
-            if not (file_path.endswith(".mp4") or file_path.endswith(".webm")):
-                continue
-            try:
-                size = int(entry.get("size") or 0)
-            except (ValueError, TypeError):
-                size = 0
-            if size > MAX_SOURCE_BYTES:
-                continue
-            choices.append((height, file_url))
+                candidate = peertube_json(server + "/api/v1/videos/" + uid, timeout=22)
+                if isinstance(candidate, dict) and str(candidate.get("uuid") or "").lower() == uid:
+                    details = candidate
+                    break
+                failures.append(urlsplit(server).hostname + ": vídeo não encontrado")
+            except (OSError, HTTPError, URLError, ValueError, TimeoutError) as error:
+                message = "tempo esgotado" if isinstance(error, (TimeoutError, socket.timeout)) or "timed out" in str(error).lower() else type(error).__name__
+                failures.append(urlsplit(server).hostname + ": " + message)
+        if details is None:
+            raise RuntimeError("Origem PeerTube sem resposta. " + "; ".join(failures) + ". Tente outro vídeo.")
+        duration = int(details.get("duration") or 0)
+        if not 0 < duration <= MAX_DURATION or details.get("isLive"):
+            raise ValueError("Vídeo sem duração conhecida, ao vivo ou longo demais")
+        choices = peertube_file_choices(details)
+        video_title = str(details.get("name") or "Vídeo")[:160]
     if not choices:
         raise ValueError("Este vídeo PeerTube não oferece arquivo MP4/WebM público")
-    # Prefer a small file, but allow 720p/1080p when an instance only has HD.
-    choices.sort(key=lambda choice: (choice[0] > 480, abs(choice[0] - 360)))
     errors = []
     # Retry the smallest preferred source once after trying alternatives.
     for _, url in (choices[:5] + choices[:1]):
@@ -633,7 +700,7 @@ def peertube_video(identifier: str, work: Path) -> Path:
         try:
             if not peertube_public_network(url):
                 raise ValueError("Servidor de vídeo não autorizado")
-            set_job(identifier, "baixando", title=str(details.get("name") or "Vídeo")[:160])
+            set_job(identifier, "baixando", title=video_title)
             req = Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "video/*"})
             with PEERTUBE_OPENER.open(req, timeout=35) as remote:
                 content_type = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()

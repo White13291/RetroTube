@@ -15,6 +15,7 @@
     .main{padding:20px 12px}.panel{background:white;border:1px solid #ddd;border-radius:5px;padding:17px;margin-bottom:14px}
     h1{font-size:23px;margin:0 0 10px}h2{font-size:18px;margin:0 0 7px}
     .search{margin-top:10px}.search input{padding:11px;border:1px solid #aaa;border-radius:3px;width:70%;font:16px Arial;background:#fff}
+    .search select{padding:10px;border:1px solid #aaa;border-radius:3px;font:16px Arial;background:#fff;color:#222}
     .api-box{margin-top:14px;padding:12px;background:#fff7eb;border:1px solid #e6cfac;border-radius:5px}
     .api-box input{padding:10px;width:66%;max-width:490px;font:16px Arial;border:1px solid #aaa;border-radius:3px;background:#fff}
     .api-box button{font-size:14px}.api-box h2{margin:0 0 8px}
@@ -25,7 +26,7 @@
     .thumb{float:left;width:155px;height:87px;background:#ddd;margin-right:15px;object-fit:cover}
     .player{display:block;width:100%;height:auto;min-height:220px;max-width:810px;background:black;margin:15px 0;border:0}
     .hide{display:none}.footer{text-align:center;color:#888;font-size:13px;padding:20px}
-    @media(max-width:600px){.panel{padding:12px}.thumb{width:115px;height:65px;margin-right:10px}.item{min-height:90px}.item h2{font-size:16px}.player{min-height:190px}.api-box input{width:100%;margin-bottom:8px}}
+    @media(max-width:600px){.panel{padding:12px}.search input{width:100%;margin-bottom:7px}.thumb{width:115px;height:65px;margin-right:10px}.item{min-height:90px}.item h2{font-size:16px}.player{min-height:190px}.api-box input{width:100%;margin-bottom:8px}}
   </style>
 </head>
 <body>
@@ -34,8 +35,12 @@
       <a href="./" class="brand"><img class="logo" src="logo.png" alt="">RetroTube</a>
       <form class="search" id="search-form" action="./" method="get">
         <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Pesquisar vídeos ou colar link" aria-label="Pesquisar vídeos">
+        <select id="search-source" name="source" aria-label="Fonte dos vídeos">
+          <option value="dailymotion" selected>Dailymotion (sem API)</option>
+          <option value="youtube">YouTube (experimental)</option>
+        </select>
         <button type="submit">Buscar vídeos</button>
-        <p class="muted"><a id="api-settings-link" href="#api-settings">Configurar busca do YouTube</a> &bull; <a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca alternativa</a></p>
+        <p class="muted"><a id="api-settings-link" href="#api-settings">Configurar busca do YouTube (opcional)</a> &bull; <a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca alternativa</a></p>
       </form>
       <div id="api-settings" class="api-box hide">
         <h2>Configurar pesquisa oficial do YouTube</h2>
@@ -52,8 +57,8 @@
   <div class="main">
     <div id="message" class="panel">
       <h1>Bem-vindo ao RetroTube</h1>
-      <p>Pesquise um assunto para ver vídeos aqui mesmo. Toque em um resultado para abri-lo no player do RetroTube. Você também pode colar um link do YouTube ou do Invidious.</p>
-      <p class="notice">Os vídeos são preparados em MP4 compatível com Safari antigo. Se o YouTube bloquear a VPS, tentaremos primeiro instâncias públicas do Invidious (como inv.nadeko.net), depois o Piped. Essas fontes podem ficar indisponíveis.</p>
+      <p>Pesquise vídeos brasileiros pelo Dailymotion, sem chave de API. Toque em um resultado para assistir no RetroTube. Você também pode colar links do Dailymotion, YouTube ou Invidious.</p>
+      <p class="notice">O Dailymotion é a fonte padrão. A VPS tenta preparar os vídeos em MP4 para o Safari antigo, sem depender de outro computador. A disponibilidade de cada vídeo ainda depende do acesso da VPS ao provedor.</p>
       <p><a href="?demo=1" id="demo-link" class="demo-button">▶ Testar reprodução (sem YouTube)</a></p>
     </div>
     <div id="results" class="panel hide"></div>
@@ -61,13 +66,13 @@
       <h1 id="video-title">Abrindo vídeo…</h1>
       <p id="video-status" class="muted"></p>
       <video id="player" class="player" controls preload="metadata" webkit-playsinline playsinline></video>
-      <p><a id="alternate-player" href="#">Tentar novamente</a> &bull; <a id="youtube-link" href="#">Abrir diretamente no YouTube</a> &bull; <a href="?demo=1">Testar player com vídeo local</a></p>
+      <p><a id="alternate-player" href="#">Tentar novamente</a> &bull; <a id="youtube-link" href="#">Abrir na plataforma original</a> &bull; <a href="?demo=1">Testar player com vídeo local</a></p>
       <p class="muted">O servidor prepara o vídeo no formato H.264/AAC. Toque em reproduzir quando ele ficar pronto.</p>
       <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

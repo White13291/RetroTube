@@ -4,6 +4,9 @@
   var message = document.getElementById("message");
   var results = document.getElementById("results");
   var watch = document.getElementById("watch");
+  var related = document.getElementById("related");
+  var relatedStatus = document.getElementById("related-status");
+  var relatedCards = document.getElementById("related-cards");
   var query = document.getElementById("search-query");
   var sourceSelect = document.getElementById("search-source");
   var player = document.getElementById("player");
@@ -14,6 +17,9 @@
   var keyStatus = document.getElementById("api-key-status");
   var memoryKey = "";
   var keyName = "retrotube_youtube_api_key";
+  var themeName = "retrotube_theme";
+  var lightThemeButton = document.getElementById("theme-light");
+  var darkThemeButton = document.getElementById("theme-dark");
   var searchSources = [
     { url: "https://pipedapi.kavin.rocks/search?q=", tail: "&filter=videos", kind: "piped" },
     { url: "https://inv.nadeko.net/api/v1/search?q=", tail: "&type=video", kind: "invidious" },
@@ -50,6 +56,23 @@
     memoryKey = "";
     try { localStorage.removeItem(keyName); } catch (ignore) {}
   }
+  function applyTheme(value) {
+    var dark = value === "dark";
+    document.body.className = dark ? "dark" : "";
+    lightThemeButton.className = dark ? "theme-option" : "theme-option selected";
+    darkThemeButton.className = dark ? "theme-option selected" : "theme-option";
+    lightThemeButton.setAttribute("aria-pressed", dark ? "false" : "true");
+    darkThemeButton.setAttribute("aria-pressed", dark ? "true" : "false");
+  }
+  function saveTheme(value) {
+    applyTheme(value);
+    try { localStorage.setItem(themeName, value); } catch (ignore) {}
+  }
+  var savedTheme = "light";
+  try { savedTheme = localStorage.getItem(themeName) || "light"; } catch (ignore) {}
+  applyTheme(savedTheme);
+  lightThemeButton.onclick = function () { saveTheme("light"); };
+  darkThemeButton.onclick = function () { saveTheme("dark"); };
   function openKeySettings() {
     keyPanel.className = "api-box";
     keyStatus.textContent = getKey() ? "Uma chave já está configurada neste navegador." : "Configure sua chave para pesquisar.";
@@ -104,6 +127,7 @@
     player.removeAttribute("src");
     player.load();
     prepareVideo(id);
+    showRelatedVideos(id, peer ? "peertube" : daily ? "dailymotion" : "youtube");
     document.getElementById("youtube-link").href = peer ? original : daily ?
       "https://www.dailymotion.com/video/" + id.slice(12) : "https://m.youtube.com/watch?v=" + id;
     document.getElementById("youtube-link").textContent = peer ? "Abrir no PeerTube" : daily ? "Abrir no Dailymotion" : "Abrir no YouTube";
@@ -120,6 +144,7 @@
     message.className = "hide";
     results.className = "hide";
     watch.className = "panel";
+    related.className = "panel hide";
     title.textContent = "Teste do player do iPad (8 segundos)";
     status.textContent = "Vídeo de teste gerado na VPS, sem acessar o YouTube. Toque em reproduzir.";
     player.src = "/api/demo.mp4";
@@ -243,6 +268,42 @@
     channel.className = "muted";
     parent.appendChild(row);
   }
+  function showRelatedVideos(id, source) {
+    related.className = "panel";
+    relatedCards.innerHTML = "";
+    relatedStatus.textContent = "Buscando vídeos relacionados...";
+    var term = param("q").slice(0, 90);
+    if (!term || getId(term)) term = param("t").slice(0, 90);
+    if (!term || term.length < 2) {
+      relatedStatus.textContent = "Pesquise um assunto para encontrar vídeos relacionados.";
+      return;
+    }
+    function renderRelated(items, error) {
+      if (error) {
+        relatedStatus.textContent = "Não foi possível carregar as sugestões agora.";
+        return;
+      }
+      var shown = 0;
+      var seen = {};
+      var i;
+      for (i = 0; items && i < items.length && shown < 6; i++) {
+        if (!items[i] || !valid(items[i].id) || items[i].id === id || seen[items[i].id]) continue;
+        seen[items[i].id] = true;
+        videoCard(relatedCards, items[i], term, source);
+        shown++;
+      }
+      relatedStatus.textContent = shown ? "Mais vídeos sobre este assunto" : "Nenhum vídeo relacionado encontrado.";
+    }
+    if (location.hostname && location.hostname !== "white13291.github.io") {
+      backendRequest("/api/search?q=" + encodeURIComponent(term) + "&source=" + encodeURIComponent(source), function (error, data) {
+        renderRelated(data && data.items, error);
+      });
+    } else if (source === "youtube" && getKey()) {
+      requestGoogle(term, getKey(), renderRelated);
+    } else {
+      relatedStatus.textContent = "As sugestões estão disponíveis no RetroTube da VPS.";
+    }
+  }
   function requestSearch(source, q, callback) {
     var xhr = new XMLHttpRequest();
     var finished = false;
@@ -343,6 +404,7 @@
   function showSearch(q) {
     message.className = "hide";
     watch.className = "hide";
+    related.className = "panel hide";
     results.className = "panel";
     query.value = q;
     var source = param("source") || selectedSource();

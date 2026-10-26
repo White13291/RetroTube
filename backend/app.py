@@ -194,7 +194,8 @@ def peertube_cached_sources(identifier: str):
             entry = entries.get(identifier, {}) if isinstance(entries, dict) else {}
         except (OSError, ValueError):
             return None
-    if not isinstance(entry, dict) or time.time() - float(entry.get("checked", 0) or 0) > 1200:
+    if (not isinstance(entry, dict) or entry.get("media_checked") is not True or
+            time.time() - float(entry.get("checked", 0) or 0) > 1200):
         return None
     sources = []
     for item in (entry.get("sources") or [])[:5]:
@@ -538,17 +539,11 @@ def peertube_file_choices(details: dict):
         for entry in files:
             if not isinstance(entry, dict):
                 continue
-            file_url = str(entry.get("fileUrl") or "")
-            if not peertube_public_url(file_url):
-                continue
             try:
                 height = int((entry.get("resolution") or {}).get("id") or 0)
             except (ValueError, TypeError, AttributeError):
                 continue
             if not 0 < height <= 1080:
-                continue
-            file_path = urlsplit(file_url).path.lower()
-            if not (file_path.endswith(".mp4") or file_path.endswith(".webm")):
                 continue
             try:
                 size = int(entry.get("size") or 0)
@@ -556,9 +551,38 @@ def peertube_file_choices(details: dict):
                 size = 0
             if size > MAX_SOURCE_BYTES:
                 continue
-            choices.append((height, file_url))
+            for field in ("fileUrl", "fileDownloadUrl"):
+                file_url = str(entry.get(field) or "")
+                if not peertube_public_url(file_url):
+                    continue
+                file_path = urlsplit(file_url).path.lower()
+                if field == "fileUrl" and not (file_path.endswith(".mp4") or file_path.endswith(".webm")):
+                    continue
+                if field == "fileDownloadUrl" and not (
+                    file_path.endswith(".mp4") or file_path.endswith(".webm") or "/download/videos/" in file_path
+                ):
+                    continue
+                if (height, file_url) not in choices:
+                    choices.append((height, file_url))
     choices.sort(key=lambda choice: (choice[0] > 480, abs(choice[0] - 360)))
-    return choices[:5]
+    return choices[:8]
+
+
+def peertube_media_alive(url: str, timeout: int = 5) -> bool:
+    """Try a tiny HTTP range before advertising a video; 404 means unusable."""
+    if not peertube_public_network(url):
+        return False
+    try:
+        req = Request(url, headers={"User-Agent": "RetroTube/1.0",
+                                    "Accept": "video/*,application/octet-stream",
+                                    "Range": "bytes=0-1023"})
+        with PEERTUBE_OPENER.open(req, timeout=timeout) as remote:
+            mime = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if not (mime.startswith("video/") or mime in ("application/octet-stream", "binary/octet-stream")):
+                return False
+            return bool(remote.read(32))
+    except (OSError, ValueError, URLError, HTTPError, TimeoutError):
+        return False
 
 
 def peertube_check_search_item(item: dict):
@@ -574,8 +598,18 @@ def peertube_check_search_item(item: dict):
         choices = peertube_file_choices(details)
         if not choices:
             return None
-        return {"sources": [{"height": h, "url": u} for h, u in choices],
-                "name": str(details.get("name") or item["title"])[:160], "checked": time.time()}
+        # A metadata response can advertise files that have already vanished.
+        # Check actual bytes before showing the video in the search results.
+        working = []
+        for height, url in choices[:3]:
+            if peertube_media_alive(url):
+                working.append((height, url))
+                break  # One verified source is enough; keep search responsive.
+        if not working:
+            return None
+        return {"sources": [{"height": h, "url": u} for h, u in working],
+                "name": str(details.get("name") or item["title"])[:160],
+                "checked": time.time(), "media_checked": True}
     except Exception:
         return None
 

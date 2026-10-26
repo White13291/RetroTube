@@ -121,6 +121,30 @@ class PipedFallbackTests(unittest.TestCase):
                 self.assertEqual(backend.peertube_available_qualities(name), [360, 480])
                 self.assertEqual(probe.call_count, 1)
 
+    def test_peertube_1080p_source_offers_every_smaller_size(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        name = "peertube_" + uid
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_media_alive", return_value=True) as probe:
+                backend.remember_peertube_videos({name: {
+                    "url": "https://tube.tchncs.de/videos/watch/" + uid,
+                    "checked": __import__("time").time(),
+                    "candidates": [{"height": 1080, "url": "https://tube.tchncs.de/1080.mp4"}],
+                }})
+                self.assertEqual(backend.peertube_available_qualities(name), [360, 480, 720, 1080])
+                self.assertEqual(probe.call_count, 1)
+
+    def test_1080p_source_is_not_lost_after_many_360p_candidates(self):
+        details = {"files": [
+            {"fileUrl": f"https://tube.tchncs.de/video-{number}-360.mp4",
+             "resolution": {"id": 360}, "size": 5000}
+            for number in range(28)
+        ] + [{"fileUrl": "https://tube.tchncs.de/1080.mp4",
+              "resolution": {"id": 1080}, "size": 5000}]}
+        choices = backend.peertube_file_choices(details)
+        self.assertIn((1080, "https://tube.tchncs.de/1080.mp4"), choices)
+
     def test_240p_only_video_does_not_advertise_higher_resolutions(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"
         name = "peertube_" + uid
@@ -180,6 +204,29 @@ class PipedFallbackTests(unittest.TestCase):
                 self.assertEqual(backend.quality_path(name, 360).read_bytes(), b"previous 360p")
                 self.assertEqual(commands[0][commands[0].index("-vf") + 1], "scale=-2:720,fps=30")
                 self.assertEqual(commands[0][commands[0].index("-level") + 1], "3.1")
+
+    def test_ffmpeg_1080p_uses_level_4_0_and_preserves_360p(self):
+        name = "peertube_da880324-5efa-4ff0-8767-7697503bc746"
+        commands = []
+        def fake_source(identifier, folder, quality):
+            source = folder / "source.mp4"
+            source.write_bytes(b"source")
+            return source
+        def fake_encode(command, **_kwargs):
+            commands.append(command)
+            Path(command[-1]).write_bytes(b"encoded")
+            return types.SimpleNamespace(returncode=0, stderr="")
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "VIDEO_DIR", Path(folder)), \
+                 patch.object(backend, "peertube_video", side_effect=fake_source), \
+                 patch.object(backend, "cache_cleanup"), \
+                 patch.object(backend.subprocess, "run", side_effect=fake_encode):
+                backend.quality_path(name, 360).write_bytes(b"old video")
+                backend.prepare_video(name, 1080)
+                self.assertEqual(backend.quality_path(name, 1080).read_bytes(), b"encoded")
+                self.assertEqual(backend.quality_path(name, 360).read_bytes(), b"old video")
+                self.assertEqual(commands[0][commands[0].index("-vf") + 1], "scale=-2:1080,fps=30")
+                self.assertEqual(commands[0][commands[0].index("-level") + 1], "4.0")
 
     def test_hosts_are_restricted(self):
         self.assertTrue(backend.approved_media_url("https://pipedproxy-bom.kavin.rocks/videoplayback?id=1"))
@@ -318,15 +365,43 @@ class PipedFallbackTests(unittest.TestCase):
                 self.assertEqual(backend.peertube_thumbnail_link(results[0]["id"]),
                                  response["data"][0]["thumbnailUrl"])
 
-    def test_peertube_search_omits_unreachable_origin(self):
+    def test_peertube_search_keeps_catalog_video_without_verified_quality(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"
-        response = {"data": [{"uuid": uid, "name": "Vídeo indisponível", "duration": 50,
+        response = {"data": [{"uuid": uid, "name": "Vídeo com qualidade não verificada", "duration": 50,
                                "url": "https://peertube.uno/videos/watch/" + uid}]}
-        with patch.object(backend, "peertube_json", return_value=response), \
-             patch.object(backend, "peertube_public_network", return_value=True), \
-             patch.object(backend, "peertube_check_search_item", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "origem acessível"):
-                backend.search_peertube("noticias")
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_json", return_value=response), \
+                 patch.object(backend, "peertube_public_network", return_value=True), \
+                 patch.object(backend, "peertube_check_search_item", return_value=None):
+                results = backend.search_peertube("noticias")
+                self.assertEqual(len(results), 1)
+                self.assertEqual(results[0]["id"], "peertube_" + uid)
+                self.assertEqual(backend.peertube_link("peertube_" + uid), response["data"][0]["url"])
+
+    def test_peertube_search_prioritizes_verified_without_removing_240p(self):
+        verified_uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        low_uid = "fbcf43ff-0706-4634-a9d2-ff70b2763f92"
+        response = {"data": [
+            {"uuid": low_uid, "name": "Vídeo em 240p", "duration": 50,
+             "url": "https://peertube.uno/videos/watch/" + low_uid},
+            {"uuid": verified_uid, "name": "Vídeo verificado em 720p", "duration": 50,
+             "url": "https://peertube.uno/videos/watch/" + verified_uid},
+        ]}
+        def check(item):
+            if item["id"].endswith(verified_uid):
+                return {"sources": [{"height": 720, "url": "https://peertube.uno/720.mp4"}],
+                        "checked": __import__("time").time(), "media_checked": True}
+            return None
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_json", return_value=response), \
+                 patch.object(backend, "peertube_public_network", return_value=True), \
+                 patch.object(backend, "peertube_check_search_item", side_effect=check):
+                results = backend.search_peertube("brasil")
+                self.assertEqual(len(results), 2)
+                self.assertEqual(results[0]["id"], "peertube_" + verified_uid)
+                self.assertEqual(results[1]["id"], "peertube_" + low_uid)
 
     def test_peertube_prefers_working_alternate_download_to_missing_mp4(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"

@@ -29,10 +29,12 @@ function descendants(node, tag) {
 function run(search, responses, done) {
   var nodes = {};
   var ids = ["message", "results", "watch", "search-query", "player",
+    "search-source",
     "video-status", "video-title", "youtube-link", "alternate-player",
     "lite-search", "search-form", "back-to-search", "api-settings",
     "api-key-input", "api-key-form", "api-key-status", "api-settings-link", "api-key-clear"];
   ids.forEach(function (id) { nodes[id] = element("div"); });
+  nodes["search-source"].value = "youtube";
   var saved = {};
   var localStorage = {
     getItem: function (k) { return saved[k] || null; },
@@ -49,8 +51,9 @@ function run(search, responses, done) {
   FakeXHR.prototype.send = function () {
     var self = this;
     setTimeout(function () {
-      var kind = self.url.indexOf("www.googleapis.com/youtube/v3/search") !== -1 ?
-        "google" : (self.url.indexOf("/api/v1/search?q=") !== -1 ? "invidious" : "piped");
+      var kind = self.url.indexOf("/api/search?") === 0 ? "backend" :
+        (self.url.indexOf("www.googleapis.com/youtube/v3/search") !== -1 ?
+        "google" : (self.url.indexOf("/api/v1/search?q=") !== -1 ? "invidious" : "piped"));
       var response = responses[kind];
       self.readyState = 4;
       self.status = response ? 200 : 500;
@@ -61,7 +64,7 @@ function run(search, responses, done) {
   FakeXHR.prototype.abort = function () {};
   vm.runInNewContext(source, {
     document: document,
-    location: { search: search },
+    location: { search: search, hostname: arguments.length > 3 ? arguments[3] : "" },
     XMLHttpRequest: FakeXHR,
     localStorage: localStorage,
     setTimeout: setTimeout,
@@ -106,7 +109,7 @@ run("?q=criacao", {
             assert(googleLinks[0].href.indexOf("?v=dQw4w9WgXcQ&q=calmaria") === 0);
             run("?v=dQw4w9WgXcQ&q=historias&t=Outra%20historia", {}, function (watchNodes) {
               assert.equal(watchNodes["video-status"].textContent.indexOf("VPS") !== -1, true);
-              assert.equal(watchNodes["back-to-search"].href, "?q=historias");
+              assert.equal(watchNodes["back-to-search"].href, "?q=historias&source=youtube");
               console.log("OK: busca oficial, fallback e player local");
             });
           }, 70);
@@ -128,3 +131,19 @@ run("?q=" + encodeURIComponent("https://inv.nadeko.net/watch?v=eWNhOwEIdRk"), {}
   assert.equal(nodes["youtube-link"].href, "https://m.youtube.com/watch?v=eWNhOwEIdRk");
   console.log("OK: links Invidious são aceitos no player do RetroTube");
 });
+
+run("?q=" + encodeURIComponent("https://www.dailymotion.com/video/x5kesuj"), {}, function (nodes) {
+  assert.equal(nodes.watch.className, "panel");
+  assert.equal(nodes["youtube-link"].href, "https://www.dailymotion.com/video/x5kesuj");
+  console.log("OK: links Dailymotion são aceitos no player");
+});
+
+run("?q=noticias&source=dailymotion", {backend: {items: [
+  {id: "dailymotion_x5kesuj", title: "Notícias brasileiras", channel: "Canal BR", thumbnail: "https://s1.dmcdn.net/v/test"}
+]}}, function (nodes) {
+  var links = descendants(nodes.results, "a");
+  assert.equal(links.length, 2);
+  assert(links[0].href.indexOf("?v=dailymotion_x5kesuj&q=noticias&source=dailymotion") === 0);
+  assert.equal(descendants(nodes.results, "img")[0].src, "https://s1.dmcdn.net/v/test");
+  console.log("OK: busca Dailymotion na VPS");
+}, "137.131.147.37");

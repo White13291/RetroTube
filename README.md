@@ -30,6 +30,10 @@ Para conferir se o Safari antigo consegue reproduzir MP4, toque em **Testar repr
 
 O GitHub Pages antigo continua no endereço de sempre; **para reproduzir vídeos, abra o endereço da VPS**.
 
+### Adicionar à Tela de Início do iPad
+
+No Safari, abra o endereço **da VPS** e use **Compartilhar → Adicionar à Tela de Início**. Os resultados, as sugestões, o reprodutor, a volta à busca e o botão de teste são navegados internamente, sem abrir uma segunda aba no Safari. Os links para a plataforma original e a busca alternativa continuam sendo externos por escolha do usuário. A interface utiliza JavaScript ES5 e a API de histórico do navegador para ser compatível com o iOS 8.3.
+
 Se o repositório já estiver na VPS:
 
 ```bash

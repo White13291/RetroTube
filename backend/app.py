@@ -12,7 +12,7 @@ import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
@@ -34,6 +34,7 @@ MAX_CACHE_GB = float(os.getenv("RETROTUBE_MAX_CACHE_GB", "3"))
 MAX_SOURCE_BYTES = 250 * 1024 * 1024
 ALLOWED_ORIGIN = os.getenv("RETROTUBE_FRONTEND_ORIGIN", "https://white13291.github.io").rstrip("/")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+DAILYMOTION_ID = re.compile(r"^dailymotion_([A-Za-z0-9]{5,14})$")
 # Public Piped instances. Their metadata and media proxies are third-party services,
 # so they may disappear or decline requests at any time.
 PIPED_INSTANCES = (
@@ -269,7 +270,7 @@ def piped_video(identifier: str, work: Path) -> Path:
 
 
 def valid_id(value: str) -> str:
-    if not VIDEO_ID.fullmatch(value or ""):
+    if not (VIDEO_ID.fullmatch(value or "") or DAILYMOTION_ID.fullmatch(value or "")):
         abort(400, "Identificador de vídeo inválido")
     return value
 
@@ -353,6 +354,38 @@ def search_videos(query: str):
     return items
 
 
+def search_dailymotion(query: str):
+    """Use yt-dlp's Dailymotion search extractor; no user API key required."""
+    if YoutubeDL is None:
+        raise RuntimeError("yt-dlp não está instalado no servidor")
+    opts = {
+        "quiet": True, "no_warnings": True, "skip_download": True,
+        "extract_flat": False, "ignoreerrors": True,
+        "playlistend": 8, "socket_timeout": 12,
+        "retries": 1, "geo_bypass_country": "BR",
+    }
+    search_url = "https://www.dailymotion.com/search/" + quote(query, safe="") + "/videos"
+    with YoutubeDL(opts) as ydl:
+        result = ydl.extract_info(search_url, download=False)
+    items = []
+    for item in (result or {}).get("entries") or []:
+        if not isinstance(item, dict):
+            continue
+        raw_id = str(item.get("id") or "")
+        if not DAILYMOTION_ID.fullmatch("dailymotion_" + raw_id):
+            continue
+        if item.get("is_live") or item.get("availability") in ("private", "premium_only", "needs_auth"):
+            continue
+        items.append({
+            "id": "dailymotion_" + raw_id,
+            "title": str(item.get("title") or "Vídeo do Dailymotion")[:160],
+            "channel": str(item.get("uploader") or item.get("channel") or "Dailymotion")[:100],
+            "duration": item.get("duration") or 0,
+            "thumbnail": str(item.get("thumbnail") or ""),
+        })
+    return items
+
+
 def search_piped(query: str):
     """Search result fallback when yt-dlp YouTube search is unavailable."""
     for base in PIPED_INSTANCES:
@@ -387,7 +420,9 @@ def prepare_video(identifier: str):
         cache_cleanup()
         work = Path(tempfile.mkdtemp(prefix=identifier + "-", dir=VIDEO_DIR))
         set_job(identifier, "obtendo")
-        url = "https://www.youtube.com/watch?v=" + identifier
+        dm_match = DAILYMOTION_ID.fullmatch(identifier)
+        url = ("https://www.dailymotion.com/video/" + dm_match.group(1)
+               if dm_match else "https://www.youtube.com/watch?v=" + identifier)
         opts = {
             "format": "bv*[height<=480]+ba/b[height<=480]/b",
             "outtmpl": str(work / "source.%(ext)s"),
@@ -411,9 +446,12 @@ def prepare_video(identifier: str):
                     source = max(candidates, key=lambda p: p.stat().st_size)
             except ValueError:
                 raise
-            except Exception:
+            except Exception as error:
+                app.logger.warning("Extração %s falhou: %s", "Dailymotion" if dm_match else "YouTube", type(error).__name__)
                 source = None
         if source is None:
+            if dm_match:
+                raise RuntimeError("Dailymotion não forneceu um vídeo reproduzível à VPS. Tente outro vídeo.")
             set_job(identifier, "alternativo")
             try:
                 source = invidious_video(identifier, work)
@@ -461,6 +499,18 @@ def search():
     query = (request.args.get("q") or "").strip()[:90]
     if len(query) < 2:
         return json_error("Digite pelo menos duas letras.", 400)
+    source = (request.args.get("source") or "dailymotion").lower()
+    if source not in ("youtube", "dailymotion"):
+        return json_error("Fonte de vídeo inválida.", 400)
+    if source == "dailymotion":
+        try:
+            items = search_dailymotion(query)
+        except Exception as error:
+            app.logger.warning("Busca Dailymotion falhou: %s", type(error).__name__)
+            items = []
+        if items:
+            return jsonify({"items": items})
+        return json_error("Dailymotion não retornou resultados. Tente outra pesquisa.", 503)
     try:
         items = search_videos(query)
     except Exception:
@@ -546,6 +596,8 @@ def demo_video():
 @app.get("/api/thumb/<identifier>")
 def thumbnail(identifier):
     identifier = valid_id(identifier)
+    if DAILYMOTION_ID.fullmatch(identifier):
+        abort(404)
     check_rate_limit("thumb", 120)
     try:
         url = "https://i.ytimg.com/vi/" + identifier + "/mqdefault.jpg"

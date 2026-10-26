@@ -12,6 +12,8 @@ function element(tag) {
     className: "",
     textContent: "",
     appendChild: function (child) { this.children.push(child); return child; },
+    removeAttribute: function (name) { delete this[name]; },
+    load: function () {},
     focus: function () {}
   };
 }
@@ -103,7 +105,7 @@ run("?q=criacao", {
             assert.equal(googleLinks.length, 2);
             assert(googleLinks[0].href.indexOf("?v=dQw4w9WgXcQ&q=calmaria") === 0);
             run("?v=dQw4w9WgXcQ&q=historias&t=Outra%20historia", {}, function (watchNodes) {
-              assert.equal(watchNodes.player.src, "https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1");
+              assert.equal(watchNodes["video-status"].textContent.indexOf("VPS") !== -1, true);
               assert.equal(watchNodes["back-to-search"].href, "?q=historias");
               console.log("OK: busca oficial, fallback e player local");
             });
@@ -112,4 +114,11 @@ run("?q=criacao", {
       }, 70);
     });
   }, 70);
+});
+
+run("?demo=1", {}, function (demoNodes) {
+  assert.equal(demoNodes.player.src, "/api/demo.mp4");
+  assert.equal(demoNodes["youtube-link"].className, "hide");
+  assert.equal(demoNodes.watch.className, "panel");
+  console.log("OK: modo de teste sem YouTube");
 });

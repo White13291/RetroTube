@@ -194,6 +194,22 @@ run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil", {
   }, 20);
 }, "137.131.147.37");
 
+run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil", {
+  qualities: {qualities: [360, 480, 720, 1080]},
+  prepare: {status: "pronto"},
+  backend: {items: []}
+}, function (nodes) {
+  var selector = nodes["quality-select"];
+  assert.equal(selector.children.length, 4);
+  assert.equal(selector.children[3].value, "1080");
+  selector.value = "1080";
+  selector.onchange();
+  setTimeout(function () {
+    assert(nodes.player.src.indexOf("?quality=1080") !== -1);
+    console.log("OK: 1080p só aparece quando a fonte oferece essa qualidade");
+  }, 20);
+}, "137.131.147.37");
+
 run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil&source=peertube&t=Hino", {
   backend: {items: [
     {id: "peertube_da880324-5efa-4ff0-8767-7697503bc746", title: "Hino atual", channel: "Canal BR"},

@@ -15,7 +15,8 @@ function element(tag) {
     removeAttribute: function (name) { delete this[name]; },
     load: function () {},
     focus: function () {},
-    setAttribute: function (name, value) { this[name] = value; }
+    setAttribute: function (name, value) { this[name] = value; },
+    getAttribute: function (name) { return this[name]; }
   };
   Object.defineProperty(node, "innerHTML", {
     get: function () { return ""; },
@@ -40,12 +41,29 @@ function run(search, responses, done, hostname, storage) {
     "video-status", "video-title", "youtube-link", "alternate-player",
     "lite-search", "search-form", "back-to-search", "api-settings",
     "api-key-input", "api-key-form", "api-key-status", "api-settings-link", "api-key-clear",
-    "theme-light", "theme-dark"];
+    "theme-light", "theme-dark", "home-link", "demo-link", "watch-demo-link"];
   ids.forEach(function (id) { nodes[id] = element("div"); });
+  nodes["home-link"].href = "./";
+  nodes["demo-link"].href = "?demo=1";
+  nodes["watch-demo-link"].href = "?demo=1";
+  nodes["back-to-search"].href = "./";
   nodes["search-source"].value = "youtube";
   var saved = storage || {};
   nodes.body = element("body");
   nodes.saved = saved;
+  var mockLocation = { search: search, hostname: hostname || "" };
+  var transitions = [];
+  var mockHistory = {
+    pushState: function (state, title, href) {
+      transitions.push(href);
+      var question = href.indexOf("?");
+      mockLocation.search = question >= 0 ? href.slice(question) : "";
+    }
+  };
+  var mockWindow = { onpopstate: null };
+  nodes.location = mockLocation;
+  nodes.transitions = transitions;
+  nodes.window = mockWindow;
   var localStorage = {
     getItem: function (k) { return saved[k] || null; },
     setItem: function (k, v) { saved[k] = v; },
@@ -78,7 +96,9 @@ function run(search, responses, done, hostname, storage) {
   FakeXHR.prototype.abort = function () {};
   vm.runInNewContext(source, {
     document: document,
-    location: { search: search, hostname: hostname || "" },
+    location: mockLocation,
+    history: mockHistory,
+    window: mockWindow,
     XMLHttpRequest: FakeXHR,
     localStorage: localStorage,
     setTimeout: setTimeout,
@@ -104,6 +124,55 @@ run("", {}, function (nodes) {
     console.log("OK: temas claro e escuro persistem após navegar");
   }, "137.131.147.37", nodes.saved);
 });
+
+run("?q=brasil&source=peertube", {backend: {items: [
+  {id: "peertube_da880324-5efa-4ff0-8767-7697503bc746", title: "Brasil", channel: "Canal BR"}
+]}}, function (nodes) {
+  var thumbLink = descendants(nodes.results, "a")[0];
+  var prevent = false;
+  thumbLink.onclick({ preventDefault: function () { prevent = true; } });
+  assert.equal(prevent, true);
+  assert.equal(nodes.watch.className, "panel");
+  assert.equal(nodes["video-title"].textContent, "Brasil");
+  assert(nodes.transitions[0].indexOf("?v=peertube_da880324") === 0);
+  assert.equal(nodes["search-query"].value, "");
+  nodes.location.search = "?q=brasil&source=peertube";
+  nodes.window.onpopstate();
+  assert.equal(nodes.results.className, "panel");
+  assert.equal(nodes.watch.className, "hide");
+  nodes["demo-link"].onclick({ preventDefault: function () {} });
+  assert.equal(nodes.player.src, "/api/demo.mp4");
+  nodes["home-link"].onclick({ preventDefault: function () {} });
+  assert.equal(nodes.message.className, "panel");
+  assert.equal(nodes.watch.className, "panel hide");
+  console.log("OK: vídeos, teste, início e voltar ficam no app do iPad");
+}, "137.131.147.37");
+
+run("", {}, function (nodes) {
+  nodes["search-query"].value = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  nodes["search-form"].onsubmit({ preventDefault: function () {} });
+  assert.equal(nodes.watch.className, "panel");
+  assert.equal(nodes.transitions[0], "?v=dQw4w9WgXcQ");
+  console.log("OK: colar URL de vídeo não abre o Safari externo");
+}, "137.131.147.37");
+
+run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil&source=peertube&t=Hino", {
+  backend: {items: [
+    {id: "peertube_da880324-5efa-4ff0-8767-7697503bc746", title: "Hino", channel: "Canal BR"},
+    {id: "peertube_fbcf43ff-0706-4634-a9d2-ff70b2763f92", title: "Outro vídeo", channel: "Canal 2"}
+  ]}
+}, function (nodes) {
+  var relatedLink = descendants(nodes["related-cards"], "a")[1];
+  assert(relatedLink && relatedLink.onclick);
+  relatedLink.onclick({ preventDefault: function () {} });
+  assert.equal(nodes["video-title"].textContent, "Outro vídeo");
+  assert.equal(nodes.watch.className, "panel");
+  assert(nodes.transitions[0].indexOf("?v=peertube_fbcf43ff") === 0);
+  nodes["back-to-search"].onclick({ preventDefault: function () {} });
+  assert.equal(nodes.results.className, "panel");
+  assert.equal(nodes["search-query"].value, "brasil");
+  console.log("OK: sugestões e botão voltar também permanecem dentro do app");
+}, "137.131.147.37");
 
 run("?v=peertube_da880324-5efa-4ff0-8767-7697503bc746&q=brasil", {
   qualities: {qualities: [360, 720]},

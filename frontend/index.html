@@ -121,7 +121,7 @@
 <body>
   <div class="header">
     <div class="inner">
-      <a href="./" class="brand"><img class="logo" src="logo.png" alt=""><span>Retro</span><span class="brand-tube">Tube</span></a>
+      <a href="./" id="home-link" class="brand"><img class="logo" src="logo.png" alt=""><span>Retro</span><span class="brand-tube">Tube</span></a>
       <form class="search" id="search-form" action="./" method="get">
         <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Pesquisar vídeos ou colar link" aria-label="Pesquisar vídeos">
         <select id="search-source" name="source" aria-label="Fonte dos vídeos">
@@ -162,7 +162,7 @@
       <video id="player" class="player" controls preload="metadata" webkit-playsinline playsinline></video>
       <h1 id="video-title">Abrindo vídeo…</h1>
       <p id="video-status" class="muted"></p>
-      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1">Testar reprodutor</a><span id="quality-picker" class="quality-picker"><label for="quality-select">Qualidade:</label><select id="quality-select" aria-label="Selecionar qualidade do vídeo" disabled><option>Verificando...</option></select></span></div>
+      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1" id="watch-demo-link">Testar reprodutor</a><span id="quality-picker" class="quality-picker"><label for="quality-select">Qualidade:</label><select id="quality-select" aria-label="Selecionar qualidade do vídeo" disabled><option>Verificando...</option></select></span></div>
       <p class="muted">Vídeo preparado em H.264/AAC para o Safari antigo. Toque em reproduzir quando estiver pronto.</p>
       <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
@@ -174,6 +174,6 @@
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

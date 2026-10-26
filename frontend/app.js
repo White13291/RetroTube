@@ -10,6 +10,9 @@
   var query = document.getElementById("search-query");
   var sourceSelect = document.getElementById("search-source");
   var player = document.getElementById("player");
+  var qualityPicker = document.getElementById("quality-picker");
+  var qualitySelect = document.getElementById("quality-select");
+  var currentQuality = 360;
   var status = document.getElementById("video-status");
   var title = document.getElementById("video-title");
   var keyPanel = document.getElementById("api-settings");
@@ -126,7 +129,13 @@
     document.getElementById("youtube-link").className = peer && !original ? "hide" : "";
     player.removeAttribute("src");
     player.load();
-    prepareVideo(id);
+    currentQuality = 360;
+    qualityPicker.className = "quality-picker";
+    qualitySelect.disabled = true;
+    qualitySelect.innerHTML = "";
+    textNode(qualitySelect, "option", "Verificando...");
+    prepareVideo(id, currentQuality);
+    loadVideoQualities(id);
     showRelatedVideos(id, peer ? "peertube" : daily ? "dailymotion" : "youtube");
     document.getElementById("youtube-link").href = peer ? original : daily ?
       "https://www.dailymotion.com/video/" + id.slice(12) : "https://m.youtube.com/watch?v=" + id;
@@ -136,7 +145,7 @@
     document.getElementById("alternate-player").onclick = function (event) {
       if (event && event.preventDefault) event.preventDefault();
       if (event) event.returnValue = false;
-      prepareVideo(id);
+      prepareVideo(id, currentQuality);
       return false;
     };
   }
@@ -145,6 +154,7 @@
     results.className = "hide";
     watch.className = "panel";
     related.className = "panel hide";
+    qualityPicker.className = "quality-picker hide";
     title.textContent = "Teste do player do iPad (8 segundos)";
     status.textContent = "Vídeo de teste gerado na VPS, sem acessar o YouTube. Toque em reproduzir.";
     player.src = "/api/demo.mp4";
@@ -174,18 +184,55 @@
       xhr.send(null);
     } catch (error) { callback("Falha de conexão com o servidor.", null); }
   }
-  function prepareVideo(id) {
-    status.textContent = "Solicitando vídeo à VPS…";
-    backendRequest("/api/prepare/" + id, function (error, data) {
+  function loadVideoQualities(id) {
+    backendRequest("/api/qualities/" + id, function (error, data) {
+      qualitySelect.innerHTML = "";
+      var choices = data && data.qualities ? data.qualities : [];
+      var allowed = {};
+      var count = 0;
+      var i;
+      for (i = 0; !error && i < choices.length; i++) {
+        var quality = Number(choices[i]);
+        if ((quality !== 360 && quality !== 480 && quality !== 720) || allowed[quality]) continue;
+        allowed[quality] = true;
+        var option = textNode(qualitySelect, "option", quality + "p");
+        option.value = String(quality);
+        count++;
+      }
+      if (!count) {
+        textNode(qualitySelect, "option", "Indisponível").value = "";
+        qualitySelect.disabled = true;
+      } else {
+        qualitySelect.disabled = false;
+        qualitySelect.value = String(currentQuality);
+      }
+    });
+    qualitySelect.onchange = function () {
+      var quality = Number(qualitySelect.value);
+      if (quality !== 360 && quality !== 480 && quality !== 720) return;
+      if (quality === currentQuality) return;
+      currentQuality = quality;
+      if (player.pause) player.pause();
+      player.removeAttribute("src");
+      player.load();
+      prepareVideo(id, quality);
+    };
+  }
+  function prepareVideo(id, quality) {
+    quality = quality || 360;
+    status.textContent = "Preparando vídeo em " + quality + "p…";
+    backendRequest("/api/prepare/" + id + "?quality=" + quality, function (error, data) {
+      if (quality !== currentQuality) return;
       if (error) { status.textContent = error + ". Abra o RetroTube pelo endereço da sua VPS."; return; }
-      updateVideo(id, data);
+      updateVideo(id, data, quality);
     });
   }
-  function updateVideo(id, data) {
+  function updateVideo(id, data, quality) {
+    if (quality !== currentQuality) return;
     if (!data) { status.textContent = "Servidor não respondeu."; return; }
     if (data.status === "pronto") {
-      status.textContent = "Vídeo pronto! Toque no botão de reprodução.";
-      player.src = "/api/video/" + id;
+      status.textContent = "Vídeo pronto em " + quality + "p! Toque no botão de reprodução.";
+      player.src = data.video_url || ("/api/video/" + id + "?quality=" + quality);
       player.load();
       return;
     }
@@ -196,9 +243,10 @@
     var labels = { na_fila: "Aguardando vaga", obtendo: "Consultando fonte de vídeo", baixando: "Obtendo o vídeo na VPS", alternativo: "Tentando outras fontes de vídeo", convertendo: "Convertendo para o iPad" };
     status.textContent = (labels[data.status] || "Processando") + "… Aguarde; isso pode levar alguns minutos.";
     setTimeout(function () {
-      backendRequest("/api/status/" + id, function (error, latest) {
+      backendRequest("/api/status/" + id + "?quality=" + quality, function (error, latest) {
+        if (quality !== currentQuality) return;
         if (error) { status.textContent = error; return; }
-        updateVideo(id, latest);
+        updateVideo(id, latest, quality);
       });
     }, 3500);
   }

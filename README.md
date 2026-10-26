@@ -4,6 +4,8 @@ O RetroTube pode ser executado na VPS Ubuntu Server. A VPS serve o site, pesquis
 
 **Fonte padrão: PeerTube.** A busca usa os índices públicos `search.joinpeertube.org` e `peertube.tv`, testados na Oracle, sem chave de API, login ou necessidade de manter um computador ligado. Ao escolher um resultado, a VPS consulta o servidor PeerTube de origem e tenta obter seu arquivo público MP4/WebM, convertendo-o para o player do iPad. Nem todos os vídeos indexados têm arquivos públicos em resoluções compatíveis ou servidores de origem acessíveis.
 
+Para reduzir os resultados que falham ao reproduzir, a busca verifica um pequeno trecho dos arquivos de mídia antes de exibi-los e experimenta `fileDownloadUrl` quando `fileUrl` não funciona. Isso pode tornar a pesquisa mais lenta e ocultar vídeos de servidores instáveis, mas evita oferecer arquivos que já respondem HTTP 404. A verificação não garante que a transferência completa funcionará.
+
 **Dailymotion (experimental):** o extrator de pesquisa do `yt-dlp` foi testado na Oracle e retornou zero vídeos; por isso não é mais a fonte padrão. **YouTube (experimental):** pode solicitar confirmação de robô à Oracle. Nesses casos o backend tenta Invidious e Piped, que também vêm apresentando erros HTTP. PeerTube tem um catálogo independente e não oferece todo o catálogo do YouTube.
 
 > Solução experimental: o YouTube pode bloquear ferramentas de extração e a reprodução real precisa ser testada no dispositivo. Respeite os direitos e termos do serviço de origem.

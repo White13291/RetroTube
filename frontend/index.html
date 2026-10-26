@@ -19,6 +19,7 @@
     .api-box input{padding:10px;width:66%;max-width:490px;font:16px Arial;border:1px solid #aaa;border-radius:3px;background:#fff}
     .api-box button{font-size:14px}.api-box h2{margin:0 0 8px}
     button{padding:11px 14px;background:#d72a32;color:white;border:0;border-radius:3px;font:16px Arial;cursor:pointer}
+    .demo-button{display:inline-block;padding:11px 14px;background:#d72a32;color:white;border-radius:3px;font:16px Arial}
     .muted{color:#666;font-size:14px}.notice{background:#fff5df;border-left:4px solid #eab34d;padding:10px 12px;margin:15px 0}
     .item{padding:12px 0;border-bottom:1px solid #eee;min-height:110px;overflow:hidden}.item:last-child{border:0}
     .thumb{float:left;width:155px;height:87px;background:#ddd;margin-right:15px;object-fit:cover}
@@ -53,19 +54,20 @@
       <h1>Bem-vindo ao RetroTube</h1>
       <p>Pesquise um assunto para ver vídeos aqui mesmo. Toque em um resultado para abri-lo no player do RetroTube. Você também pode colar um link do YouTube.</p>
       <p class="notice">Na versão da VPS, os vídeos são preparados em MP4 compatível com Safari antigo. A preparação pode demorar alguns minutos. O YouTube pode bloquear a obtenção de alguns vídeos.</p>
+      <p><a href="?demo=1" id="demo-link" class="demo-button">▶ Testar reprodução (sem YouTube)</a></p>
     </div>
     <div id="results" class="panel hide"></div>
     <div id="watch" class="panel hide">
       <h1 id="video-title">Abrindo vídeo…</h1>
       <p id="video-status" class="muted"></p>
       <video id="player" class="player" controls preload="metadata" webkit-playsinline playsinline></video>
-      <p><a id="alternate-player" href="#">Tentar novamente</a> &bull; <a id="youtube-link" href="#">Abrir diretamente no YouTube</a></p>
+      <p><a id="alternate-player" href="#">Tentar novamente</a> &bull; <a id="youtube-link" href="#">Abrir diretamente no YouTube</a> &bull; <a href="?demo=1">Testar player com vídeo local</a></p>
       <p class="muted">O servidor prepara o vídeo no formato H.264/AAC. Toque em reproduzir quando ele ficar pronto.</p>
       <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

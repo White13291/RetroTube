@@ -2,7 +2,7 @@
 
 O RetroTube agora pode ser executado na VPS Ubuntu Server. Nesse modo, a VPS serve o site, pesquisa vídeos e tenta prepará-los como **MP4 (H.264 baseline + AAC)**. A conversão ocorre **na VPS**, e o iPad assiste pelo player nativo HTML5. Nenhum arquivo precisa ser baixado manualmente no iPad.
 
-Se o YouTube solicitar confirmação de robô à Oracle, o backend **tenta automaticamente provedores públicos do Piped** para busca e obtenção de um MP4 progressivo. É um fallback experimental: esses provedores são de terceiros, podem ficar indisponíveis e não há garantia de que disponibilizem todos os vídeos. Não é preciso criar uma conta nem colocar cookies do Google no servidor.
+Se o YouTube solicitar confirmação de robô à Oracle, o backend **tenta automaticamente instâncias públicas do Invidious** (incluindo `inv.nadeko.net`) para pesquisa e obtenção de MP4 progressivo pelo proxy de vídeo do próprio Invidious (`/latest_version?local=true`). Caso todas falhem, tenta o Piped. São serviços de terceiros e podem ficar indisponíveis, impor limites ou bloquear solicitações da VPS; não há garantia de reprodução de todos os vídeos. Não é preciso inserir cookies nem credenciais do Google no servidor.
 
 > Solução experimental: o YouTube pode bloquear ferramentas de extração e a reprodução real precisa ser testada no dispositivo. Respeite os direitos e termos do serviço de origem.
 
@@ -39,7 +39,14 @@ sudo bash install-vps.sh
 3. Confira os logs com `sudo docker compose logs --tail=80 retrotube` (ou `sudo docker-compose logs --tail=80 retrotube`).
 4. Se a porta 8080 estiver ocupada, use `sudo env RETROTUBE_PORT=8081 bash install-vps.sh` e libere a porta 8081.
 5. Se um vídeo falhar, veja os logs: o YouTube pode bloquear consultas provenientes de IPs de datacenters.
-6. Se a mensagem disser que as fontes alternativas estão indisponíveis, tente novamente em outro momento. O fallback Piped depende da disponibilidade de servidores públicos que não controlamos.
+6. Se a mensagem disser que as fontes alternativas estão indisponíveis, teste o Invidious na **própria VPS**:
+
+   ```bash
+   curl -i --max-time 20 'https://inv.nadeko.net/api/v1/videos/eWNhOwEIdRk?region=BR'
+   ```
+
+   Uma resposta JSON com `formatStreams` indica que o endpoint de metadados funciona; HTTP 403, 429, 500, 502 ou 503 indica bloqueio ou indisponibilidade, e o RetroTube tentará outras instâncias. Este teste **não garante** que o proxy de MP4 também esteja acessível.
+7. Para verificar a conversão de um vídeo específico, acesse `http://127.0.0.1:8080/api/prepare/eWNhOwEIdRk` e depois `http://127.0.0.1:8080/api/status/eWNhOwEIdRk` na VPS. Se estiver usando porta `8081`, substitua `8080` nos comandos.
 
 ## Atualizar
 
@@ -55,4 +62,5 @@ sudo bash install-vps.sh
 - Sua chave da YouTube Data API v3 **não está no repositório**. A busca pela VPS não exige chave. Se usar a versão GitHub Pages, a chave permanece no navegador onde foi salva.
 - A API fica pública na porta 8080. Há limites básicos por IP e duração máxima de 30 minutos. O cache limita vídeos prontos a aproximadamente 3 GB, mas arquivos temporários podem consumir espaço adicional.
 - A VPS normalmente obtém e converte o vídeo antes de iniciar a reprodução (o iPad não precisa baixar arquivos manualmente). A entrega aceita HTTP Range/206.
+- O Invidious fornece uma API pública de busca e metadados, mas o site `inv.nadeko.net` funcionar no PC **não prova** que a Oracle conseguirá fazer a mesma requisição. Valide na VPS após atualizar.
 - Para HTTPS com domínio próprio, é necessário configurar separadamente um certificado compatível com o iPad.

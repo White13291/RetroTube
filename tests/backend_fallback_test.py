@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 class AppStub:
     def __init__(self, name):
-        pass
+        self.logger = types.SimpleNamespace(warning=lambda *args: None)
 
     def get(self, path):
         return lambda fn: fn
@@ -69,7 +69,7 @@ class PipedFallbackTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as work:
             with patch.object(backend, "piped_json", return_value=metadata):
-                with self.assertRaisesRegex(RuntimeError, "alternativos"):
+                with self.assertRaisesRegex(RuntimeError, "alternativas"):
                     backend.piped_video("dQw4w9WgXcQ", Path(work))
 
 

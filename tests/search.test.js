@@ -110,6 +110,7 @@ run("?q=criacao", {
             run("?v=dQw4w9WgXcQ&q=historias&t=Outra%20historia", {}, function (watchNodes) {
               assert.equal(watchNodes["video-status"].textContent.indexOf("VPS") !== -1, true);
               assert.equal(watchNodes["back-to-search"].href, "?q=historias&source=youtube");
+              assert.equal(watchNodes["search-query"].value, "");
               console.log("OK: busca oficial, fallback e player local");
             });
           }, 70);
@@ -162,6 +163,7 @@ run("?q=brasil&source=peertube", {backend: {items: [
     encodeURIComponent("https://tube.tchncs.de/videos/watch/da880324-5efa-4ff0-8767-7697503bc746"), {}, function (watchNodes) {
     assert.equal(watchNodes.watch.className, "panel");
     assert.equal(watchNodes["youtube-link"].textContent, "Abrir no PeerTube");
+    assert.equal(watchNodes["search-query"].value, "");
     console.log("OK: busca PeerTube sem API e player na VPS");
   });
 }, "137.131.147.37");

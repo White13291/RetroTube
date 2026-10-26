@@ -185,6 +185,10 @@ class PipedFallbackTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
                  patch.object(backend, "peertube_json", return_value=response), \
+                 patch.object(backend, "peertube_check_search_item", return_value={
+                     "sources": [{"height": 360, "url": "https://tube.tchncs.de/static/webseed/test-360.mp4"}],
+                     "name": "Hino Nacional Brasileiro", "checked": 1700000000
+                 }), \
                  patch.object(backend, "peertube_public_network", return_value=True):
                 results = backend.search_peertube("brasil")
                 self.assertEqual(len(results), 1)
@@ -194,6 +198,32 @@ class PipedFallbackTests(unittest.TestCase):
                 self.assertEqual(results[0]["thumbnail"], "/api/thumb/peertube_" + uid)
                 self.assertEqual(backend.peertube_thumbnail_link(results[0]["id"]),
                                  response["data"][0]["thumbnailUrl"])
+
+    def test_peertube_search_omits_unreachable_origin(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        response = {"data": [{"uuid": uid, "name": "Vídeo indisponível", "duration": 50,
+                               "url": "https://peertube.uno/videos/watch/" + uid}]}
+        with patch.object(backend, "peertube_json", return_value=response), \
+             patch.object(backend, "peertube_public_network", return_value=True), \
+             patch.object(backend, "peertube_check_search_item", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "origem acessível"):
+                backend.search_peertube("noticias")
+
+    def test_peertube_uses_verified_cached_media_without_origin_api(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        identifier = "peertube_" + uid
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_json", side_effect=AssertionError("não deve consultar origem")), \
+                 patch.object(backend, "peertube_public_network", return_value=True), \
+                 patch.object(backend, "PEERTUBE_OPENER", FakePeerVideo()):
+                backend.remember_peertube_videos({identifier: {
+                    "url": "https://tube.tchncs.de/videos/watch/" + uid,
+                    "checked": __import__("time").time(), "name": "Hino Nacional",
+                    "sources": [{"height": 360, "url": "https://tube.tchncs.de/static/webseed/test-360.mp4"}],
+                }})
+                self.assertEqual(backend.peertube_video(identifier, Path(folder)).read_bytes(),
+                                 b"peertube-test-video-bytes")
 
     def test_peertube_thumbnail_proxies_to_old_safari(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"

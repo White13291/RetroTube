@@ -135,8 +135,8 @@ def peertube_json(url: str):
     return json.loads(data)
 
 
-def remember_peertube_videos(videos: dict[str, str]):
-    """Remember search-issued video links across server restarts; no user URL inputs."""
+def remember_peertube_videos(videos: dict[str, dict | str]):
+    """Persist indexed video origins and thumbnails across container restarts."""
     if not videos:
         return
     with LOCK:
@@ -159,7 +159,8 @@ def peertube_link(identifier: str) -> str:
     with LOCK:
         try:
             entries = json.loads(PEERTUBE_INDEX.read_text(encoding="utf-8"))
-            link = entries.get(identifier, "") if isinstance(entries, dict) else ""
+            entry = entries.get(identifier, "") if isinstance(entries, dict) else ""
+            link = entry.get("url", "") if isinstance(entry, dict) else entry
         except (OSError, ValueError):
             link = ""
     if not link:
@@ -170,6 +171,19 @@ def peertube_link(identifier: str) -> str:
     if not path.endswith("/" + identifier[len("peertube_"):]):
         raise ValueError("Endereço PeerTube inconsistente")
     return link
+
+
+def peertube_thumbnail_link(identifier: str) -> str:
+    if not PEERTUBE_ID.fullmatch(identifier):
+        return ""
+    with LOCK:
+        try:
+            entries = json.loads(PEERTUBE_INDEX.read_text(encoding="utf-8"))
+            entry = entries.get(identifier, {}) if isinstance(entries, dict) else {}
+            link = str(entry.get("thumbnail") or "") if isinstance(entry, dict) else ""
+        except (OSError, ValueError):
+            link = ""
+    return link if peertube_public_url(link) else ""
 
 
 class ApprovedRedirects(HTTPRedirectHandler):
@@ -534,10 +548,10 @@ def search_peertube(query: str):
                     "title": str(entry["name"])[:160],
                     "channel": str(account.get("displayName") or account.get("name") or "PeerTube")[:100],
                     "duration": duration,
-                    "thumbnail": thumbnail,
+                    "thumbnail": "/api/thumb/" + identifier,
                     "original_url": canonical,
                 })
-                links[identifier] = canonical
+                links[identifier] = {"url": canonical, "thumbnail": thumbnail}
                 if len(items) >= 12:
                     break
             if items:
@@ -577,7 +591,7 @@ def peertube_video(identifier: str, work: Path) -> Path:
                 height = int((entry.get("resolution") or {}).get("id") or 0)
             except (ValueError, TypeError, AttributeError):
                 continue
-            if not 0 < height <= 480:
+            if not 0 < height <= 1080:
                 continue
             file_path = urlsplit(file_url).path.lower()
             if not (file_path.endswith(".mp4") or file_path.endswith(".webm")):
@@ -590,8 +604,9 @@ def peertube_video(identifier: str, work: Path) -> Path:
                 continue
             choices.append((height, file_url))
     if not choices:
-        raise ValueError("Este vídeo PeerTube não oferece um arquivo MP4/WebM até 480p")
-    choices.sort(key=lambda choice: choice[0], reverse=True)
+        raise ValueError("Este vídeo PeerTube não oferece arquivo MP4/WebM público")
+    # Prefer a small file, but allow 720p/1080p when an instance only has HD.
+    choices.sort(key=lambda choice: (choice[0] > 480, abs(choice[0] - 360)))
     errors = []
     for _, url in choices[:5]:
         source = work / ("peertube-source" + (".webm" if urlsplit(url).path.lower().endswith(".webm") else ".mp4"))
@@ -724,6 +739,7 @@ def prepare_video(identifier: str):
         set_job(identifier, "pronto")
     except Exception as error:
         # Keep the error short: do not expose subprocess commands or filesystem paths.
+        app.logger.warning("Erro ao preparar %s: %s", identifier, str(error)[:350])
         set_job(identifier, "erro", message=str(error)[:350])
     finally:
         if work:
@@ -848,9 +864,24 @@ def demo_video():
 @app.get("/api/thumb/<identifier>")
 def thumbnail(identifier):
     identifier = valid_id(identifier)
-    if DAILYMOTION_ID.fullmatch(identifier) or PEERTUBE_ID.fullmatch(identifier):
+    if DAILYMOTION_ID.fullmatch(identifier):
         abort(404)
     check_rate_limit("thumb", 120)
+    if PEERTUBE_ID.fullmatch(identifier):
+        photo = peertube_thumbnail_link(identifier)
+        if photo and peertube_public_network(photo):
+            try:
+                with PEERTUBE_OPENER.open(Request(photo, headers={"User-Agent": "RetroTube/1.0"}), timeout=12) as remote:
+                    mime = (remote.headers.get("Content-Type") or "").split(";")[0].lower().strip()
+                    if mime not in ("image/jpeg", "image/png", "image/webp"):
+                        raise ValueError("Resposta não é imagem")
+                    raw = remote.read(500_001)
+                if 0 < len(raw) <= 500_000:
+                    return app.response_class(raw, mimetype=mime,
+                                              headers={"Cache-Control": "public, max-age=1800"})
+            except Exception as error:
+                app.logger.warning("Capa PeerTube indisponível: %s", type(error).__name__)
+        return send_from_directory(FRONTEND_DIR, "logo.png")
     try:
         url = "https://i.ytimg.com/vi/" + identifier + "/mqdefault.jpg"
         with urlopen(Request(url, headers={"User-Agent": "RetroTube/1.0"}), timeout=8) as remote:

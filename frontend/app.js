@@ -60,6 +60,10 @@
       var watchId = /[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/.exec(value);
       if (watchId) return watchId[1];
     }
+    if (/^(?:https?:\/\/)?(?:inv\.nadeko\.net|invidious\.nerdvpn\.de|yt\.chocolatemoo53\.com|invidious\.tiekoetter\.com)\/watch\?/i.test(value)) {
+      var alternateId = /[?&]v=([A-Za-z0-9_-]{11})(?:[&#]|$)/.exec(value);
+      if (alternateId) return alternateId[1];
+    }
     return "";
   }
   function textNode(parent, tag, value) {

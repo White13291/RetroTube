@@ -36,7 +36,8 @@
       <form class="search" id="search-form" action="./" method="get">
         <input id="search-query" type="text" name="q" required maxlength="500" placeholder="Pesquisar vídeos ou colar link" aria-label="Pesquisar vídeos">
         <select id="search-source" name="source" aria-label="Fonte dos vídeos">
-          <option value="dailymotion" selected>Dailymotion (sem API)</option>
+          <option value="peertube" selected>PeerTube (sem API)</option>
+          <option value="dailymotion">Dailymotion (experimental)</option>
           <option value="youtube">YouTube (experimental)</option>
         </select>
         <button type="submit">Buscar vídeos</button>
@@ -57,8 +58,8 @@
   <div class="main">
     <div id="message" class="panel">
       <h1>Bem-vindo ao RetroTube</h1>
-      <p>Pesquise vídeos brasileiros pelo Dailymotion, sem chave de API. Toque em um resultado para assistir no RetroTube. Você também pode colar links do Dailymotion, YouTube ou Invidious.</p>
-      <p class="notice">O Dailymotion é a fonte padrão. A VPS tenta preparar os vídeos em MP4 para o Safari antigo, sem depender de outro computador. A disponibilidade de cada vídeo ainda depende do acesso da VPS ao provedor.</p>
+      <p>Pesquise vídeos no PeerTube, inclusive conteúdo em português, sem chave de API. Toque em um resultado para assistir no RetroTube. YouTube e Dailymotion continuam disponíveis para testes.</p>
+      <p class="notice">O PeerTube é a fonte padrão. A VPS tenta obter o vídeo público e convertê-lo para MP4 compatível com o Safari antigo, sem precisar manter seu computador ligado. Nem todo vídeo está disponível para conversão.</p>
       <p><a href="?demo=1" id="demo-link" class="demo-button">▶ Testar reprodução (sem YouTube)</a></p>
     </div>
     <div id="results" class="panel hide"></div>
@@ -73,6 +74,6 @@
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

@@ -95,7 +95,9 @@
     var peer = isPeerTube(id);
     var original = param("u");
     if (!/^https:\/\/[a-z0-9.-]+\//i.test(original)) original = "";
-    query.value = peer ? (original || id) : daily ? "https://www.dailymotion.com/video/" + id.slice(12) : "https://www.youtube.com/watch?v=" + id;
+    // The top search box stays clean on watch pages, just like a video site.
+    // Keep the original URL only in the "Abrir na plataforma" link below.
+    query.value = "";
     title.textContent = param("t").slice(0, 160) || "Vídeo " + id;
     status.textContent = "Preparando vídeo para o Safari antigo…";
     document.getElementById("youtube-link").className = peer && !original ? "hide" : "";

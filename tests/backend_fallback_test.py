@@ -45,6 +45,14 @@ class FakeInvidiousProxy:
         return result
 
 
+class FakePeerVideo:
+    def open(self, request, timeout):
+        assert request.full_url == "https://tube.tchncs.de/static/webseed/test-360.mp4"
+        result = io.BytesIO(b"peertube-test-video-bytes")
+        result.headers = {"Content-Type": "video/mp4"}
+        return result
+
+
 class PipedFallbackTests(unittest.TestCase):
     def test_hosts_are_restricted(self):
         self.assertTrue(backend.approved_media_url("https://pipedproxy-bom.kavin.rocks/videoplayback?id=1"))
@@ -149,6 +157,58 @@ class PipedFallbackTests(unittest.TestCase):
         self.assertEqual(backend.valid_id("dailymotion_x5kesuj"), "dailymotion_x5kesuj")
         self.assertEqual(backend.valid_id("eWNhOwEIdRk"), "eWNhOwEIdRk")
         self.assertFalse(backend.DAILYMOTION_ID.fullmatch("dailymotion_../../secret"))
+
+    def test_peertube_blocks_local_or_untrusted_urls(self):
+        self.assertFalse(backend.peertube_public_network("http://tube.tchncs.de/watch"))
+        self.assertFalse(backend.peertube_public_network("https://127.0.0.1/admin"))
+        self.assertFalse(backend.peertube_public_network("https://localhost/test"))
+        self.assertFalse(backend.peertube_public_network("https://user:pass@tube.tchncs.de/api"))
+        self.assertFalse(backend.peertube_public_network("https://tube.tchncs.de:8080/api"))
+        self.assertTrue(backend.peertube_public_url("https://tube.tchncs.de/api/v1/videos/uuid"))
+
+    def test_peertube_search_without_key_and_persists_origin(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        response = {"data": [{
+            "uuid": uid, "name": "Hino Nacional Brasileiro", "duration": 100,
+            "url": "https://tube.tchncs.de/videos/watch/" + uid,
+            "thumbnailUrl": "https://tube.tchncs.de/lazy-static/thumbnails/a.jpg",
+            "channel": {"displayName": "Música BR"},
+        }]}
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_json", return_value=response), \
+                 patch.object(backend, "peertube_public_network", return_value=True):
+                results = backend.search_peertube("brasil")
+                self.assertEqual(len(results), 1)
+                self.assertEqual(results[0]["id"], "peertube_" + uid)
+                self.assertIn("Hino Nacional", results[0]["title"])
+                self.assertEqual(backend.peertube_link(results[0]["id"]), response["data"][0]["url"])
+
+    def test_peertube_downloads_progressive_mp4_from_video_details(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        details = {"duration": 100, "name": "Hino Nacional", "files": [
+            {"fileUrl": "https://tube.tchncs.de/static/webseed/test-360.mp4", "resolution": {"id": 360}}
+        ]}
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_json", return_value=details), \
+                 patch.object(backend, "peertube_public_network", return_value=True), \
+                 patch.object(backend, "PEERTUBE_OPENER", FakePeerVideo()):
+                backend.remember_peertube_videos({"peertube_" + uid: "https://tube.tchncs.de/videos/watch/" + uid})
+                result = backend.peertube_video("peertube_" + uid, Path(folder))
+                self.assertEqual(result.read_bytes(), b"peertube-test-video-bytes")
+
+    def test_peertube_rejects_unsafe_media_source(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        details = {"duration": 60, "files": [
+            {"fileUrl": "http://127.0.0.1/hidden.mp4", "resolution": {"id": 360}}
+        ]}
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_json", return_value=details):
+                backend.remember_peertube_videos({"peertube_" + uid: "https://tube.tchncs.de/videos/watch/" + uid})
+                with self.assertRaisesRegex(ValueError, "não oferece"):
+                    backend.peertube_video("peertube_" + uid, Path(folder))
 
 
 if __name__ == "__main__":

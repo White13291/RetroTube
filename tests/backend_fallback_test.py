@@ -53,6 +53,14 @@ class FakePeerVideo:
         return result
 
 
+class FakePeerThumbnail:
+    def open(self, request, timeout):
+        assert request.full_url == "https://tube.tchncs.de/lazy-static/thumbnails/demo.jpg"
+        result = io.BytesIO(b"tiny-jpeg-test")
+        result.headers = {"Content-Type": "image/jpeg"}
+        return result
+
+
 class PipedFallbackTests(unittest.TestCase):
     def test_hosts_are_restricted(self):
         self.assertTrue(backend.approved_media_url("https://pipedproxy-bom.kavin.rocks/videoplayback?id=1"))
@@ -183,6 +191,27 @@ class PipedFallbackTests(unittest.TestCase):
                 self.assertEqual(results[0]["id"], "peertube_" + uid)
                 self.assertIn("Hino Nacional", results[0]["title"])
                 self.assertEqual(backend.peertube_link(results[0]["id"]), response["data"][0]["url"])
+                self.assertEqual(results[0]["thumbnail"], "/api/thumb/peertube_" + uid)
+                self.assertEqual(backend.peertube_thumbnail_link(results[0]["id"]),
+                                 response["data"][0]["thumbnailUrl"])
+
+    def test_peertube_thumbnail_proxies_to_old_safari(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        name = "peertube_" + uid
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_public_network", return_value=True), \
+                 patch.object(backend, "PEERTUBE_OPENER", FakePeerThumbnail()), \
+                 patch.object(backend, "check_rate_limit"), \
+                 patch.object(backend.app, "response_class", create=True,
+                              side_effect=lambda data, **kwargs: (data, kwargs)):
+                backend.remember_peertube_videos({name: {
+                    "url": "https://tube.tchncs.de/videos/watch/" + uid,
+                    "thumbnail": "https://tube.tchncs.de/lazy-static/thumbnails/demo.jpg",
+                }})
+                image, headers = backend.thumbnail(name)
+                self.assertEqual(image, b"tiny-jpeg-test")
+                self.assertEqual(headers["mimetype"], "image/jpeg")
 
     def test_peertube_downloads_progressive_mp4_from_video_details(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"

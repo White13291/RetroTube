@@ -62,6 +62,8 @@
     .player{display:block;width:100%;height:auto;min-height:260px;background:#08090c;border:0;border-radius:10px}
     .watch-actions{border-top:1px solid #edeef1;border-bottom:1px solid #edeef1;margin:18px 0;padding:12px 0;font-size:14px}
     .watch-actions a{display:inline-block;margin:3px 15px 3px 0;font-weight:bold}
+    .quality-picker{display:inline-block;margin:3px 0 3px 2px;font-size:14px;font-weight:bold}
+    .quality-picker select{margin-left:5px;padding:8px 9px;border:1px solid #dadddf;background:#fff;color:#24262b;border-radius:7px;font:14px Arial,Helvetica,sans-serif}
     #back-to-search{display:inline-block;margin-top:8px}
     #related{max-width:960px;margin:0 auto 24px;background:transparent;border:0;padding:0}
     #related h2{font-size:22px;margin:3px 0 7px}
@@ -87,6 +89,7 @@
     body.dark .item>a:first-child,body.dark .thumb{background:#303138}
     body.dark .item h2 a{color:#f0f0f2}
     body.dark .watch-actions{border-color:#393a40}
+    body.dark .quality-picker select{background:#26272c;color:#f2f2f3;border-color:#484a52}
     body.dark .footer{color:#a6a8b0}
     body.dark .theme-option.selected{background:#e52b35;color:#fff;border-color:#e52b35}
     body.dark .theme-option.selected:hover{background:#c91c29;color:#fff}
@@ -159,7 +162,7 @@
       <video id="player" class="player" controls preload="metadata" webkit-playsinline playsinline></video>
       <h1 id="video-title">Abrindo vídeo…</h1>
       <p id="video-status" class="muted"></p>
-      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1">Testar reprodutor</a></div>
+      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1">Testar reprodutor</a><span id="quality-picker" class="quality-picker"><label for="quality-select">Qualidade:</label><select id="quality-select" aria-label="Selecionar qualidade do vídeo" disabled><option>Verificando...</option></select></span></div>
       <p class="muted">Vídeo preparado em H.264/AAC para o Safari antigo. Toque em reproduzir quando estiver pronto.</p>
       <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
@@ -171,6 +174,6 @@
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

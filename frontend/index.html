@@ -41,6 +41,12 @@
     #message .hero-eyebrow{margin:0 0 8px;color:#ff858c;font-size:12px;font-weight:bold;letter-spacing:1.8px}
     #message .notice{font-size:13px;color:#d7d9dd;background:rgba(255,255,255,.08);border-left:3px solid #f5464e;border-radius:4px;padding:12px 14px;margin:20px 0}
     .demo-button{display:inline-block;margin-top:3px}
+    .theme-picker{margin-top:24px;padding-top:17px;border-top:1px solid rgba(255,255,255,.18)}
+    .theme-picker .theme-label{display:block;margin-bottom:9px;color:#e5e5e8;font-size:13px;font-weight:bold}
+    .theme-option{display:inline-block;margin-right:7px;padding:10px 18px;background:#353841;color:#e5e5e8;border:1px solid #50535d;border-radius:9px;font-size:14px}
+    .theme-option:hover{background:#484c56}
+    .theme-option.selected{background:#fff;color:#1d2027;border-color:#fff}
+    .theme-option.selected:hover{background:#eee;color:#1d2027}
     #results{background:transparent;border:0;padding:0}
     #results h1{font-size:23px;margin:0 0 5px}
     #results>.muted{margin:0 0 20px}
@@ -57,8 +63,33 @@
     .watch-actions{border-top:1px solid #edeef1;border-bottom:1px solid #edeef1;margin:18px 0;padding:12px 0;font-size:14px}
     .watch-actions a{display:inline-block;margin:3px 15px 3px 0;font-weight:bold}
     #back-to-search{display:inline-block;margin-top:8px}
+    #related{max-width:960px;margin:0 auto 24px;background:transparent;border:0;padding:0}
+    #related h2{font-size:22px;margin:3px 0 7px}
+    #related .item{width:47.8%;margin:0 1% 18px;min-height:260px}
+    #related .item>a:first-child,#related .thumb{height:180px}
     .hide{display:none!important}
     .footer{text-align:center;color:#999da6;font-size:12px;padding:20px}
+    body.dark{background:#0f1012;color:#f2f2f3}
+    body.dark a{color:#ff717b}
+    body.dark .header{background:#18191c;border-bottom-color:#303137;box-shadow:0 2px 14px rgba(0,0,0,.18)}
+    body.dark .brand{color:#fafafa}
+    body.dark .search input,body.dark .search select{background:#26272c;border-color:#484a52;color:#f2f2f3}
+    body.dark .search-tools,body.dark .search-tools a{color:#c0c1c7}
+    body.dark .api-box{background:#282322;border-color:#53413b}
+    body.dark .api-box input{background:#26272c;border-color:#484a52;color:#f2f2f3}
+    body.dark .panel{background:#1c1d21;border-color:#33343a}
+    body.dark .muted{color:#b0b2ba}
+    body.dark #message{background:#22242c;border:0}
+    body.dark #message .notice{background:rgba(255,255,255,.06)}
+    body.dark #results{background:transparent;border:0}
+    body.dark .item{background:#202126;border-color:#34353b;box-shadow:0 3px 9px rgba(0,0,0,.17)}
+    body.dark .item:hover{border-color:#595b65;box-shadow:0 7px 20px rgba(0,0,0,.23)}
+    body.dark .item>a:first-child,body.dark .thumb{background:#303138}
+    body.dark .item h2 a{color:#f0f0f2}
+    body.dark .watch-actions{border-color:#393a40}
+    body.dark .footer{color:#a6a8b0}
+    body.dark .theme-option.selected{background:#e52b35;color:#fff;border-color:#e52b35}
+    body.dark .theme-option.selected:hover{background:#c91c29;color:#fff}
     @media(max-width:950px){
       .search{margin-left:195px}.api-box{margin-left:195px}
       .item{width:48%}.item>a:first-child,.thumb{height:190px}
@@ -72,12 +103,15 @@
       .main{padding-top:15px}.panel{padding:18px}
       #message{padding:28px 22px}#message h1{font-size:26px}
       #watch{padding:14px}.player{min-height:200px}
+      #related h2{font-size:20px}
     }
     @media(max-width:480px){
       .item{width:100%;margin:0 0 16px;min-height:0}
       .item>a:first-child,.thumb{height:190px}
       .api-box input{width:100%;margin-bottom:8px}
       #watch h1{font-size:20px}.player{min-height:185px}
+      #related .item{width:100%;margin:0 0 16px;min-height:0}
+      #related .item>a:first-child,#related .thumb{height:190px}
     }
   </style>
 </head>
@@ -114,6 +148,11 @@
       <p>Pesquise, escolha e assista diretamente no RetroTube. Uma experiência simples e familiar, feita especialmente para o Safari antigo.</p>
       <p class="notice">O PeerTube funciona sem chave de API. Nossa VPS prepara os vídeos disponíveis em um formato compatível com o iPad, sem depender de outro computador.</p>
       <p><a href="?demo=1" id="demo-link" class="demo-button">▶ Testar o reprodutor</a></p>
+      <div class="theme-picker" role="group" aria-label="Escolher aparência do RetroTube">
+        <span class="theme-label">Aparência do site</span>
+        <button type="button" id="theme-light" class="theme-option selected" aria-pressed="true">☀ Tema claro</button>
+        <button type="button" id="theme-dark" class="theme-option" aria-pressed="false">☾ Tema escuro</button>
+      </div>
     </div>
     <div id="results" class="panel hide"></div>
     <div id="watch" class="panel hide">
@@ -124,9 +163,14 @@
       <p class="muted">Vídeo preparado em H.264/AAC para o Safari antigo. Toque em reproduzir quando estiver pronto.</p>
       <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
+    <div id="related" class="panel hide">
+      <h2>Vídeos relacionados</h2>
+      <p id="related-status" class="muted">Buscando vídeos...</p>
+      <div id="related-cards"></div>
+    </div>
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

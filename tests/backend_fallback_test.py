@@ -1,4 +1,4 @@
-"""Unit tests for the Piped fallback without requiring a running VPS or Flask."""
+"""Backend tests without requiring a running VPS, Flask or external services."""
 import importlib.util
 import io
 import sys
@@ -62,6 +62,125 @@ class FakePeerThumbnail:
 
 
 class PipedFallbackTests(unittest.TestCase):
+    def test_quality_paths_keep_existing_360p_cache_and_isolate_other_sizes(self):
+        name = "peertube_da880324-5efa-4ff0-8767-7697503bc746"
+        self.assertEqual(backend.quality_path(name, 360), backend.cached_path(name))
+        self.assertTrue(str(backend.quality_path(name, 480)).endswith("-480p.mp4"))
+        self.assertTrue(str(backend.quality_path(name, 720)).endswith("-720p.mp4"))
+
+    def test_peertube_confirms_every_available_resolution_before_advertising(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        name = "peertube_" + uid
+        sources = [
+            {"height": 360, "url": "https://tube.tchncs.de/video360.mp4"},
+            {"height": 480, "url": "https://tube.tchncs.de/video480.mp4"},
+            {"height": 720, "url": "https://tube.tchncs.de/video720.mp4"},
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_media_alive",
+                              side_effect=lambda url: url.endswith("360.mp4") or url.endswith("720.mp4")) as probe:
+                backend.remember_peertube_videos({name: {
+                    "url": "https://tube.tchncs.de/videos/watch/" + uid,
+                    "checked": __import__("time").time(), "candidates": sources,
+                }})
+                self.assertEqual(backend.peertube_available_qualities(name), [360, 480, 720])
+                # 480p can be downscaled from the verified 720p stream.
+                self.assertEqual(probe.call_count, 3)
+                self.assertEqual(backend.peertube_available_qualities(name), [360, 480, 720])
+                self.assertEqual(probe.call_count, 3)  # The check is cached.
+
+    def test_peertube_does_not_offer_unreachable_480p_or_720p(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        name = "peertube_" + uid
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_media_alive",
+                              side_effect=lambda url: url.endswith("360.mp4")):
+                backend.remember_peertube_videos({name: {
+                    "url": "https://tube.tchncs.de/videos/watch/" + uid,
+                    "checked": __import__("time").time(), "candidates": [
+                        {"height": q, "url": f"https://tube.tchncs.de/{q}.mp4"}
+                        for q in (360, 480, 720)
+                    ]
+                }})
+                self.assertEqual(backend.peertube_available_qualities(name), [360])
+
+    def test_peertube_480p_source_allows_360p_and_480p_but_not_720p(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        name = "peertube_" + uid
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_media_alive", return_value=True) as probe:
+                backend.remember_peertube_videos({name: {
+                    "url": "https://tube.tchncs.de/videos/watch/" + uid,
+                    "checked": __import__("time").time(), "candidates": [
+                        {"height": 480, "url": "https://tube.tchncs.de/480.mp4"}
+                    ],
+                }})
+                self.assertEqual(backend.peertube_available_qualities(name), [360, 480])
+                self.assertEqual(probe.call_count, 1)
+
+    def test_240p_only_video_does_not_advertise_higher_resolutions(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        name = "peertube_" + uid
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_media_alive", return_value=True) as probe:
+                backend.remember_peertube_videos({name: {
+                    "url": "https://tube.tchncs.de/videos/watch/" + uid,
+                    "checked": __import__("time").time(),
+                    "candidates": [{"height": 240, "url": "https://tube.tchncs.de/240.mp4"}],
+                }})
+                self.assertEqual(backend.peertube_available_qualities(name), [])
+                self.assertEqual(probe.call_count, 0)
+
+    def test_prepare_isolated_quality_jobs_and_video_urls(self):
+        name = "peertube_da880324-5efa-4ff0-8767-7697503bc746"
+        queued = []
+        fake_pool = types.SimpleNamespace(submit=lambda *args: queued.append(args))
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "VIDEO_DIR", Path(folder)), \
+                 patch.object(backend, "JOBS", {}), \
+                 patch.object(backend, "POOL", fake_pool), \
+                 patch.object(backend, "check_rate_limit"), \
+                 patch.object(backend, "request", types.SimpleNamespace(args={"quality": "720"})):
+                self.assertEqual(backend.prepare(name)["status"], "na_fila")
+                self.assertEqual(queued[-1][1:], (name, 720))
+                self.assertEqual(backend.status(name)["status"], "na_fila")
+                with patch.object(backend, "request", types.SimpleNamespace(args={"quality": "360"})):
+                    self.assertEqual(backend.prepare(name)["status"], "na_fila")
+                    self.assertEqual(queued[-1][1:], (name, 360))
+                backend.quality_path(name, 720).write_bytes(b"a ready 720p file")
+                self.assertIn("quality=720", backend.status(name)["video_url"])
+                self.assertFalse(backend.quality_path(name, 360).is_file())
+
+    def test_ffmpeg_720p_uses_supported_level_and_separate_mp4(self):
+        name = "peertube_da880324-5efa-4ff0-8767-7697503bc746"
+        commands = []
+
+        def fake_download(identifier, folder, quality):
+            src = folder / "source.mp4"
+            src.write_bytes(b"source")
+            return src
+
+        def fake_ffmpeg(command, **_kwargs):
+            commands.append(command)
+            Path(command[-1]).write_bytes(b"converted 720p")
+            return types.SimpleNamespace(returncode=0, stderr="")
+
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "VIDEO_DIR", Path(folder)), \
+                 patch.object(backend, "peertube_video", side_effect=fake_download), \
+                 patch.object(backend, "cache_cleanup"), \
+                 patch.object(backend.subprocess, "run", side_effect=fake_ffmpeg):
+                backend.quality_path(name, 360).write_bytes(b"previous 360p")
+                backend.prepare_video(name, 720)
+                self.assertEqual(backend.quality_path(name, 720).read_bytes(), b"converted 720p")
+                self.assertEqual(backend.quality_path(name, 360).read_bytes(), b"previous 360p")
+                self.assertEqual(commands[0][commands[0].index("-vf") + 1], "scale=-2:720,fps=30")
+                self.assertEqual(commands[0][commands[0].index("-level") + 1], "3.1")
+
     def test_hosts_are_restricted(self):
         self.assertTrue(backend.approved_media_url("https://pipedproxy-bom.kavin.rocks/videoplayback?id=1"))
         self.assertFalse(backend.approved_media_url("http://127.0.0.1/private"))

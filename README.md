@@ -18,6 +18,8 @@ sudo bash install-vps.sh
 
 Ao concluir, abra **http://IP-DA-SUA-VPS:8080/** no Safari do iPad. Substitua `IP-DA-SUA-VPS` pelo IPv4 público exibido no painel da hospedagem.
 
+Para conferir se o Safari antigo consegue reproduzir MP4, toque em **Testar reprodução (sem YouTube)**. Isso abre um vídeo de 8 segundos gerado diretamente pela VPS, sem fazer consultas externas. O link direto de teste é `http://IP-DA-SUA-VPS:PORTA/?demo=1`.
+
 O GitHub Pages antigo continua no endereço de sempre; **para reproduzir vídeos, abra o endereço da VPS**.
 
 Se o repositório já estiver na VPS:

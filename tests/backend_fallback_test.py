@@ -215,7 +215,7 @@ class PipedFallbackTests(unittest.TestCase):
 
     def test_peertube_downloads_progressive_mp4_from_video_details(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"
-        details = {"duration": 100, "name": "Hino Nacional", "files": [
+        details = {"uuid": uid, "duration": 100, "name": "Hino Nacional", "files": [
             {"fileUrl": "https://tube.tchncs.de/static/webseed/test-360.mp4", "resolution": {"id": 360}}
         ]}
         with tempfile.TemporaryDirectory() as folder:
@@ -229,7 +229,7 @@ class PipedFallbackTests(unittest.TestCase):
 
     def test_peertube_rejects_unsafe_media_source(self):
         uid = "da880324-5efa-4ff0-8767-7697503bc746"
-        details = {"duration": 60, "files": [
+        details = {"uuid": uid, "duration": 60, "files": [
             {"fileUrl": "http://127.0.0.1/hidden.mp4", "resolution": {"id": 360}}
         ]}
         with tempfile.TemporaryDirectory() as folder:
@@ -238,6 +238,29 @@ class PipedFallbackTests(unittest.TestCase):
                 backend.remember_peertube_videos({"peertube_" + uid: "https://tube.tchncs.de/videos/watch/" + uid})
                 with self.assertRaisesRegex(ValueError, "não oferece"):
                     backend.peertube_video("peertube_" + uid, Path(folder))
+
+    def test_peertube_retries_metadata_on_federated_server(self):
+        uid = "da880324-5efa-4ff0-8767-7697503bc746"
+        urls = []
+
+        def metadata(url, timeout=15):
+            urls.append(url)
+            if url.startswith("https://tube.tchncs.de"):
+                raise TimeoutError("The read operation timed out")
+            return {"uuid": uid, "duration": 35, "name": "Teste de rede", "files": [
+                {"fileUrl": "https://tube.tchncs.de/static/webseed/test-360.mp4",
+                 "resolution": {"id": 360}}
+            ]}
+
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(backend, "PEERTUBE_INDEX", Path(folder) / "peertube-index.json"), \
+                 patch.object(backend, "peertube_json", side_effect=metadata), \
+                 patch.object(backend, "peertube_public_network", return_value=True), \
+                 patch.object(backend, "PEERTUBE_OPENER", FakePeerVideo()):
+                backend.remember_peertube_videos({"peertube_" + uid: "https://tube.tchncs.de/videos/watch/" + uid})
+                self.assertTrue(backend.peertube_video("peertube_" + uid, Path(folder)).is_file())
+        self.assertEqual(len(urls), 2)
+        self.assertTrue(urls[1].startswith("https://peertube.tv/api/v1/videos/"))
 
 
 if __name__ == "__main__":

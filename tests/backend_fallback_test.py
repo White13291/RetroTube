@@ -117,6 +117,39 @@ class PipedFallbackTests(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["id"], "eWNhOwEIdRk")
 
+    def test_dailymotion_search_does_not_require_an_api_key(self):
+        searched = []
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, download=False):
+                searched.append(url)
+                return {"entries": [
+                    {"id": "x5kesuj", "title": "Notícia do Brasil", "uploader": "TV brasileira", "duration": 99,
+                     "thumbnail": "https://s1.dmcdn.net/v/example"},
+                    {"id": "@invalid", "title": "Inválido"},
+                ]}
+
+        with patch.object(backend, "YoutubeDL", FakeYoutubeDL):
+            results = backend.search_dailymotion("notícias brasil")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["id"], "dailymotion_x5kesuj")
+        self.assertEqual(results[0]["title"], "Notícia do Brasil")
+        self.assertIn("www.dailymotion.com/search/", searched[0])
+
+    def test_video_validation_accepts_dailymotion_and_rejects_untrusted_ids(self):
+        self.assertEqual(backend.valid_id("dailymotion_x5kesuj"), "dailymotion_x5kesuj")
+        self.assertEqual(backend.valid_id("eWNhOwEIdRk"), "eWNhOwEIdRk")
+        self.assertFalse(backend.DAILYMOTION_ID.fullmatch("dailymotion_../../secret"))
+
 
 if __name__ == "__main__":
     unittest.main()

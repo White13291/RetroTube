@@ -23,6 +23,8 @@
   var themeName = "retrotube_theme";
   var lightThemeButton = document.getElementById("theme-light");
   var darkThemeButton = document.getElementById("theme-dark");
+  var routeSearch = location.search || "";
+  var viewVersion = 0;
   var searchSources = [
     { url: "https://pipedapi.kavin.rocks/search?q=", tail: "&filter=videos", kind: "piped" },
     { url: "https://inv.nadeko.net/api/v1/search?q=", tail: "&type=video", kind: "invidious" },
@@ -82,7 +84,7 @@
     keyInput.focus();
   }
   function param(name) {
-    var match = new RegExp("[?&]" + name + "=([^&]*)").exec(location.search);
+    var match = new RegExp("[?&]" + name + "=([^&]*)").exec(routeSearch);
     try { return match ? decodeURIComponent(match[1].replace(/\+/g, " ")) : ""; }
     catch (error) { return ""; }
   }
@@ -112,6 +114,27 @@
     el.appendChild(document.createTextNode(value));
     parent.appendChild(el);
     return el;
+  }
+  function navigateInsideApp(path) {
+    // Navigation via a regular link launches Safari from older iOS home-screen apps.
+    // Update the address without reloading and draw the destination in this window.
+    var question = path.indexOf("?");
+    routeSearch = question >= 0 ? path.slice(question) : "";
+    try {
+      if (typeof history !== "undefined" && history.pushState) {
+        history.pushState(null, "", path);
+      }
+    } catch (ignore) {}
+    renderRoute();
+  }
+  function interceptInternalLink(anchor) {
+    anchor.onclick = function (event) {
+      if (event && event.preventDefault) event.preventDefault();
+      if (event) event.returnValue = false;
+      var path = anchor.getAttribute ? anchor.getAttribute("href") : anchor.href;
+      navigateInsideApp(path || "./");
+      return false;
+    };
   }
   function showVideo(id) {
     message.className = "hide";
@@ -185,7 +208,9 @@
     } catch (error) { callback("Falha de conexão com o servidor.", null); }
   }
   function loadVideoQualities(id) {
+    var startedAt = viewVersion;
     backendRequest("/api/qualities/" + id, function (error, data) {
+      if (startedAt !== viewVersion) return;
       qualitySelect.innerHTML = "";
       var choices = data && data.qualities ? data.qualities : [];
       var allowed = {};
@@ -220,15 +245,16 @@
   }
   function prepareVideo(id, quality) {
     quality = quality || 360;
+    var startedAt = viewVersion;
     status.textContent = "Preparando vídeo em " + quality + "p…";
     backendRequest("/api/prepare/" + id + "?quality=" + quality, function (error, data) {
-      if (quality !== currentQuality) return;
+      if (startedAt !== viewVersion || quality !== currentQuality) return;
       if (error) { status.textContent = error + ". Abra o RetroTube pelo endereço da sua VPS."; return; }
-      updateVideo(id, data, quality);
+      updateVideo(id, data, quality, startedAt);
     });
   }
-  function updateVideo(id, data, quality) {
-    if (quality !== currentQuality) return;
+  function updateVideo(id, data, quality, startedAt) {
+    if (startedAt !== viewVersion || quality !== currentQuality) return;
     if (!data) { status.textContent = "Servidor não respondeu."; return; }
     if (data.status === "pronto") {
       status.textContent = "Vídeo pronto em " + quality + "p! Toque no botão de reprodução.";
@@ -243,10 +269,11 @@
     var labels = { na_fila: "Aguardando vaga", obtendo: "Consultando fonte de vídeo", baixando: "Obtendo o vídeo na VPS", alternativo: "Tentando outras fontes de vídeo", convertendo: "Convertendo para o iPad" };
     status.textContent = (labels[data.status] || "Processando") + "… Aguarde; isso pode levar alguns minutos.";
     setTimeout(function () {
+      if (startedAt !== viewVersion || quality !== currentQuality) return;
       backendRequest("/api/status/" + id + "?quality=" + quality, function (error, latest) {
-        if (quality !== currentQuality) return;
+        if (startedAt !== viewVersion || quality !== currentQuality) return;
         if (error) { status.textContent = error; return; }
-        updateVideo(id, latest, quality);
+        updateVideo(id, latest, quality, startedAt);
       });
     }, 3500);
   }
@@ -305,10 +332,12 @@
     thumb.height = 87;
     thumb.loading = "lazy";
     link.appendChild(thumb);
+    interceptInternalLink(link);
     row.appendChild(link);
     var heading = document.createElement("h2");
     var titleLink = document.createElement("a");
     titleLink.href = link.href;
+    interceptInternalLink(titleLink);
     titleLink.appendChild(document.createTextNode(video.title));
     heading.appendChild(titleLink);
     row.appendChild(heading);
@@ -317,6 +346,7 @@
     parent.appendChild(row);
   }
   function showRelatedVideos(id, source) {
+    var startedAt = viewVersion;
     related.className = "panel";
     relatedCards.innerHTML = "";
     relatedStatus.textContent = "Buscando vídeos relacionados...";
@@ -327,6 +357,7 @@
       return;
     }
     function renderRelated(items, error) {
+      if (startedAt !== viewVersion) return;
       if (error) {
         relatedStatus.textContent = "Não foi possível carregar as sugestões agora.";
         return;
@@ -410,11 +441,12 @@
     } catch (error) { finish(null, "O Safari não conseguiu abrir a conexão com a API."); }
   }
   function searchWithPublicSources(q, progress, cards) {
+    var startedAt = viewVersion;
     progress.textContent = "Tentando serviços públicos de busca…";
     var next = 0;
     var success = false;
     function batch() {
-      if (success) return;
+      if (success || startedAt !== viewVersion) return;
       if (next >= searchSources.length) {
         progress.textContent = "Os serviços públicos não retornaram resultados. Configure uma chave oficial do YouTube para pesquisar com mais confiabilidade.";
         return;
@@ -426,7 +458,7 @@
       for (i = start; i < next; i++) {
         count++;
         requestSearch(searchSources[i], q, function (items) {
-          if (success) return;
+          if (success || startedAt !== viewVersion) return;
           if (items && items.length) {
             success = true;
             progress.textContent = items.length + " vídeos encontrados. Toque para assistir no RetroTube.";
@@ -450,6 +482,7 @@
     };
   }
   function showSearch(q) {
+    var startedAt = viewVersion;
     message.className = "hide";
     watch.className = "hide";
     related.className = "panel hide";
@@ -467,6 +500,7 @@
     if (location.hostname && location.hostname !== "white13291.github.io") {
       progress.textContent = "Buscando vídeos…";
       backendRequest("/api/search?q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(source), function (error, data) {
+        if (startedAt !== viewVersion) return;
         if (error) {
           progress.textContent = error + (source === "youtube" ? ". Você também pode configurar a busca do YouTube." : "");
           if (source === "youtube") addPublicButton(results, progress, cards, q);
@@ -494,6 +528,7 @@
     }
     progress.textContent = "Buscando vídeos no YouTube…";
     requestGoogle(q, key, function (items, error) {
+      if (startedAt !== viewVersion) return;
       if (error) {
         progress.textContent = error;
         var change = textNode(results, "button", "Verificar ou trocar chave");
@@ -546,17 +581,12 @@
     if (event && event.preventDefault) event.preventDefault();
     if (event) event.returnValue = false;
     if (id) {
-      location.href = "?v=" + encodeURIComponent(id);
+      navigateInsideApp("?v=" + encodeURIComponent(id));
       return false;
     }
     var q = String(query.value || "").replace(/^\s+|\s+$/g, "").slice(0, 150);
     if (!q) return false;
-    try {
-      if (typeof history !== "undefined" && history.pushState) {
-        history.pushState(null, "", "?q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(selectedSource()));
-      }
-    } catch (ignore) {}
-    showSearch(q);
+    navigateInsideApp("?q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(selectedSource()));
     return false;
   };
   document.getElementById("lite-search").onclick = function (event) {
@@ -568,15 +598,41 @@
       encodeURIComponent(term + " site:youtube.com");
     return false;
   };
-  var id = param("v");
-  if (param("demo") === "1") {
-    showDemo();
-  } else if (valid(id)) {
-    showVideo(id);
-  } else if (param("q")) {
-    var q = param("q").slice(0, 150);
-    var pastedId = getId(q);
-    if (pastedId) showVideo(pastedId);
-    else showSearch(q);
+  function showHome() {
+    message.className = "panel";
+    results.className = "panel hide";
+    watch.className = "panel hide";
+    related.className = "panel hide";
+    query.value = "";
   }
+  function renderRoute() {
+    viewVersion++;
+    if (player.pause) player.pause();
+    player.removeAttribute("src");
+    player.load();
+    var id = param("v");
+    if (param("demo") === "1") {
+      showDemo();
+    } else if (valid(id)) {
+      showVideo(id);
+    } else if (param("q")) {
+      var q = param("q").slice(0, 150);
+      var pastedId = getId(q);
+      if (pastedId) showVideo(pastedId);
+      else showSearch(q);
+    } else {
+      showHome();
+    }
+  }
+  interceptInternalLink(document.getElementById("home-link"));
+  interceptInternalLink(document.getElementById("demo-link"));
+  interceptInternalLink(document.getElementById("watch-demo-link"));
+  interceptInternalLink(document.getElementById("back-to-search"));
+  if (typeof window !== "undefined") {
+    window.onpopstate = function () {
+      routeSearch = location.search || "";
+      renderRoute();
+    };
+  }
+  renderRoute();
 }());

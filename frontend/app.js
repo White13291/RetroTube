@@ -218,7 +218,7 @@
       var i;
       for (i = 0; !error && i < choices.length; i++) {
         var quality = Number(choices[i]);
-        if ((quality !== 360 && quality !== 480 && quality !== 720) || allowed[quality]) continue;
+        if ((quality !== 360 && quality !== 480 && quality !== 720 && quality !== 1080) || allowed[quality]) continue;
         allowed[quality] = true;
         var option = textNode(qualitySelect, "option", quality + "p");
         option.value = String(quality);
@@ -234,7 +234,7 @@
     });
     qualitySelect.onchange = function () {
       var quality = Number(qualitySelect.value);
-      if (quality !== 360 && quality !== 480 && quality !== 720) return;
+      if (quality !== 360 && quality !== 480 && quality !== 720 && quality !== 1080) return;
       if (quality === currentQuality) return;
       currentQuality = quality;
       if (player.pause) player.pause();

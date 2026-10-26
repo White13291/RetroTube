@@ -355,7 +355,7 @@
     var cards = document.createElement("div");
     results.appendChild(cards);
     if (location.hostname && location.hostname !== "white13291.github.io") {
-      progress.textContent = "Buscando vídeos pela VPS…";
+      progress.textContent = "Buscando vídeos…";
       backendRequest("/api/search?q=" + encodeURIComponent(q) + "&source=" + encodeURIComponent(source), function (error, data) {
         if (error) {
           progress.textContent = error + (source === "youtube" ? ". Você também pode configurar a busca do YouTube." : "");

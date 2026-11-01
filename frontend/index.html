@@ -74,6 +74,7 @@
     #related .item>a:first-child,#related .thumb{height:180px}
     .library-link{display:inline-block;margin-left:12px;padding:11px 16px;background:#fff;color:#d72833;border-radius:8px;font-weight:bold}
     .saved-item{padding:12px 0;border-bottom:1px solid #ddd}
+    .saved-original{display:block;margin:5px 13px;color:#b51e28;font-size:13px}
     .delete-saved{display:block;margin:3px 13px 13px;padding:8px 12px;font-size:13px;background:#6b7079}
     .delete-saved:hover{background:#b51e28}
     .delete-saved:disabled{opacity:.5}
@@ -174,7 +175,8 @@
       <h1>★ Vídeos Salvos</h1>
       <p class="muted">Estes vídeos não expiram após 72 horas. Os uploads são convertidos para o iPad.</p>
       <form id="upload-form" enctype="multipart/form-data">
-        <label for="upload-video"><strong>Enviar vídeo do computador (MP4)</strong></label>
+        <label for="upload-video"><strong>Enviar vídeo do computador (MP4, até 5 GB)</strong></label>
+        <p class="muted">Envio em partes, com retomada se a conexão cair. O original mantém sua qualidade; o iPad pode precisar de uma versão compatível.</p>
         <p><input id="upload-video" type="file" accept="video/mp4,.mp4" required></p>
         <button type="submit">Enviar vídeo</button>
         <p id="upload-status" class="muted"></p>
@@ -198,6 +200,6 @@
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

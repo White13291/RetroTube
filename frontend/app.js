@@ -207,6 +207,24 @@
           "Convertendo para o iPad..." :
           item.status === "erro" ? ("Erro: " + (item.message || "falha na conversão")) : "Vídeo salvo");
         note.className = "muted";
+        if (item.status !== "processando") {
+          var remove = textNode(row, "button", "Excluir vídeo");
+          remove.type = "button";
+          remove.className = "delete-saved";
+          (function (savedId, savedTitle, button) {
+            button.onclick = function () {
+              if (!window.confirm('Excluir "' + savedTitle + '"? O arquivo MP4 será apagado da VPS permanentemente.')) return;
+              if (!authorizedToken()) return;
+              button.disabled = true;
+              adminPost("/api/saved/delete/" + encodeURIComponent(savedId), "{}", function (error) {
+                if (error) {
+                  button.disabled = false;
+                  window.alert(error);
+                } else showSaved();
+              }, false);
+            };
+          }(item.id, item.title || "este vídeo", remove));
+        }
         savedList.appendChild(row);
       }
     });

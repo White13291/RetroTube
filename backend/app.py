@@ -37,6 +37,8 @@ MAX_ACTIVE_JOBS = int(os.getenv("RETROTUBE_MAX_ACTIVE_JOBS", "2"))
 MAX_QUEUE = int(os.getenv("RETROTUBE_MAX_QUEUE", "8"))
 MAX_CACHE_GB = float(os.getenv("RETROTUBE_MAX_CACHE_GB", "3"))
 MAX_SOURCE_BYTES = 250 * 1024 * 1024
+MAX_UPLOAD_BYTES = 5 * 1024**3
+UPLOAD_CHUNK_SIZE = 8 * 1024**2
 CACHE_TTL_SECONDS = 72 * 3600
 SAVED_DIR = VIDEO_DIR / "saved"
 SAVED_DIR.mkdir(parents=True, exist_ok=True)
@@ -593,6 +595,14 @@ def cache_housekeeper():
     while True:
         try:
             cache_cleanup()
+            # Unfinished uploads are temporary and may be resumed for 72 hours.
+            for meta_path in SAVED_DIR.glob("*.chunks.json"):
+                if time.time() - meta_path.stat().st_mtime < CACHE_TTL_SECONDS:
+                    continue
+                key = meta_path.name[:-len(".chunks.json")]
+                if re.fullmatch(r"[0-9a-f]{32}", key):
+                    (SAVED_DIR / (key + ".upload")).unlink(missing_ok=True)
+                    meta_path.unlink(missing_ok=True)
         except Exception as error:
             app.logger.warning("Limpeza de cache: %s", type(error).__name__)
         threading.Event().wait(3600)
@@ -629,9 +639,12 @@ def list_saved_videos():
         entries = saved_entries()
     return jsonify({"items": [
         {"id": key, "title": entry.get("title", "Vídeo salvo"),
-         "status": entry.get("status", "pronto"), "message": entry.get("message", "")}
+         "status": entry.get("status", "pronto"), "message": entry.get("message", ""),
+         "original": (SAVED_DIR / (key + ".original.mp4")).is_file()}
         for key, entry in reversed(list(entries.items()))
-        if (SAVED_DIR / (key + ".mp4")).is_file() or entry.get("status") == "processando"
+        if ((SAVED_DIR / (key + ".mp4")).is_file() or
+            (SAVED_DIR / (key + ".original.mp4")).is_file() or
+            entry.get("status") in ("processando", "erro"))
     ]})
 
 
@@ -656,29 +669,51 @@ def save_video(identifier):
 
 
 def process_uploaded_video(key, source):
+    """Keep the original intact; avoid transcoding when Safari can play it."""
+    output = SAVED_DIR / (key + ".mp4")
+    original = SAVED_DIR / (key + ".original.mp4")
     try:
-        if not has_audio_stream(source):
-            raise ValueError("Arquivo sem faixa de áudio.")
-        output = SAVED_DIR / (key + ".mp4")
-        command = [
-            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-            "-i", str(source), "-map", "0:v:0", "-map", "0:a:0",
-            "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27",
-            "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.0",
-            "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-movflags", "+faststart",
-            str(output)
-        ]
-        result = subprocess.run(command, capture_output=True, text=True, timeout=2400)
-        if result.returncode or not output.is_file() or not has_audio_stream(output):
-            raise RuntimeError("Não foi possível converter este vídeo para o iPad.")
+        info = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(source)],
+            capture_output=True, text=True, timeout=120, check=True
+        )
+        streams = json.loads(info.stdout).get("streams", [])
+        video = next((item for item in streams if item.get("codec_type") == "video"), None)
+        audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+        if not video:
+            raise ValueError("Arquivo não contém uma faixa de vídeo.")
+        compatible = (
+            video.get("codec_name") == "h264" and
+            int(video.get("width") or 0) <= 1920 and
+            int(video.get("height") or 0) <= 1080 and
+            (not audio or audio.get("codec_name") == "aac")
+        )
+        if compatible:
+            # Hard links keep one physical copy, with identical video/audio quality.
+            os.link(source, output)
+        else:
+            command = [
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
+                "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.0",
+                "-c:a", "aac", "-b:a", "160k", "-ac", "2",
+                "-movflags", "+faststart", str(output)
+            ]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=14400)
+            if result.returncode:
+                raise RuntimeError("Não foi possível criar uma versão compatível com o iPad.")
+        if not output.is_file() or output.stat().st_size == 0:
+            raise RuntimeError("Arquivo convertido vazio.")
         with LOCK:
             entries = saved_entries()
             if key in entries:
                 entries[key]["status"] = "pronto"
+                entries[key]["message"] = ""
                 write_saved_entries(entries)
     except Exception as error:
-        (SAVED_DIR / (key + ".mp4")).unlink(missing_ok=True)
+        output.unlink(missing_ok=True)
         with LOCK:
             entries = saved_entries()
             if key in entries:
@@ -686,7 +721,138 @@ def process_uploaded_video(key, source):
                 entries[key]["message"] = str(error)[:160]
                 write_saved_entries(entries)
     finally:
-        source.unlink(missing_ok=True)
+        # Old uploads use a .upload temporary source; chunked uploads use
+        # .original.mp4 and retain that file permanently.
+        if source != original:
+            source.unlink(missing_ok=True)
+
+
+def upload_meta_path(key):
+    return SAVED_DIR / (key + ".chunks.json")
+
+
+def read_upload_meta(key):
+    try:
+        return json.loads(upload_meta_path(key).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_upload_meta(key, meta):
+    temporary = SAVED_DIR / (key + ".chunks.tmp")
+    temporary.write_text(json.dumps(meta), encoding="utf-8")
+    os.replace(temporary, upload_meta_path(key))
+
+
+@app.post("/api/upload/init")
+def init_large_upload():
+    denied = require_admin()
+    if denied:
+        return denied
+    data = request.get_json(silent=True) or {}
+    try:
+        size = int(data.get("size") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return json_error("Tamanho inválido.", 400)
+    name = str(data.get("name") or "Vídeo enviado")[:160]
+    if not name.lower().endswith(".mp4") or size < 1 or size > MAX_UPLOAD_BYTES:
+        return json_error("Selecione um MP4 de até 5 GB.", 400)
+    resume_id = str(data.get("resume_id") or "")
+    with LOCK:
+        if re.fullmatch(r"[0-9a-f]{32}", resume_id):
+            meta = read_upload_meta(resume_id)
+            if meta and meta.get("name") == name and meta.get("size") == size:
+                return jsonify({"id": resume_id, "chunk_size": UPLOAD_CHUNK_SIZE,
+                                "received": meta.get("received", [])})
+        if shutil.disk_usage(VIDEO_DIR).free < size + 100 * 1024**2:
+            return json_error("Espaço insuficiente na VPS para receber o vídeo.", 507)
+        key = uuid.uuid4().hex
+        (SAVED_DIR / (key + ".upload")).touch(exist_ok=False)
+        write_upload_meta(key, {"name": name, "size": size, "received": [],
+                                "created": time.time()})
+    return jsonify({"id": key, "chunk_size": UPLOAD_CHUNK_SIZE, "received": []})
+
+
+@app.post("/api/upload/chunk/<key>/<int:index>")
+def write_large_upload_chunk(key, index):
+    denied = require_admin()
+    if denied:
+        return denied
+    if not re.fullmatch(r"[0-9a-f]{32}", key):
+        abort(404)
+    with LOCK:
+        meta = read_upload_meta(key)
+        if not meta:
+            return json_error("Envio não encontrado. Selecione o arquivo novamente.", 404)
+        size = int(meta["size"])
+        count = (size + UPLOAD_CHUNK_SIZE - 1) // UPLOAD_CHUNK_SIZE
+        if index < 0 or index >= count:
+            return json_error("Parte do arquivo inválida.", 400)
+        expected = min(UPLOAD_CHUNK_SIZE, size - index * UPLOAD_CHUNK_SIZE)
+        if request.content_length is not None and request.content_length != expected:
+            return json_error("Parte incompleta.", 400)
+        data = request.stream.read(expected + 1)
+        if len(data) != expected:
+            return json_error("Parte incompleta.", 400)
+        destination = SAVED_DIR / (key + ".upload")
+        if not destination.is_file():
+            return json_error("Arquivo temporário indisponível.", 409)
+        descriptor = os.open(destination, os.O_WRONLY)
+        try:
+            offset = index * UPLOAD_CHUNK_SIZE
+            remaining = memoryview(data)
+            while remaining:
+                written = os.pwrite(descriptor, remaining, offset)
+                if written <= 0:
+                    raise OSError("Não foi possível gravar o vídeo.")
+                offset += written
+                remaining = remaining[written:]
+        finally:
+            os.close(descriptor)
+        received = set(meta.get("received", []))
+        received.add(index)
+        meta["received"] = sorted(received)
+        write_upload_meta(key, meta)
+    return jsonify({"ok": True, "received": len(meta["received"])})
+
+
+@app.post("/api/upload/complete/<key>")
+def complete_large_upload(key):
+    denied = require_admin()
+    if denied:
+        return denied
+    if not re.fullmatch(r"[0-9a-f]{32}", key):
+        abort(404)
+    with LOCK:
+        meta = read_upload_meta(key)
+        if not meta:
+            return json_error("Envio não encontrado.", 404)
+        size = int(meta["size"])
+        count = (size + UPLOAD_CHUNK_SIZE - 1) // UPLOAD_CHUNK_SIZE
+        if set(meta.get("received", [])) != set(range(count)):
+            return json_error("Ainda faltam partes do arquivo.", 409)
+        source = SAVED_DIR / (key + ".upload")
+        if not source.is_file() or source.stat().st_size != size:
+            return json_error("O tamanho do arquivo recebido não corresponde ao original.", 409)
+        original = SAVED_DIR / (key + ".original.mp4")
+        os.replace(source, original)
+        entries = saved_entries()
+        entries[key] = {"title": meta["name"], "status": "processando"}
+        write_saved_entries(entries)
+        upload_meta_path(key).unlink(missing_ok=True)
+    threading.Thread(target=process_uploaded_video, args=(key, original), daemon=True).start()
+    return jsonify({"ok": True, "id": key, "status": "processando"})
+
+
+@app.get("/api/saved/original/<key>")
+def download_original(key):
+    if not re.fullmatch(r"[0-9a-f]{32}", key):
+        abort(404)
+    path = SAVED_DIR / (key + ".original.mp4")
+    if not path.is_file():
+        abort(404)
+    return send_file(path, mimetype="video/mp4", conditional=True, as_attachment=True,
+                     download_name="retrotube-original.mp4")
 
 
 @app.post("/api/upload")
@@ -759,6 +925,7 @@ def delete_saved_video(key):
         # Deleting the MP4 also removes the thumbnail and persistent index entry.
         try:
             (SAVED_DIR / (key + ".mp4")).unlink(missing_ok=True)
+            (SAVED_DIR / (key + ".original.mp4")).unlink(missing_ok=True)
             saved_thumbnail_path(key).unlink(missing_ok=True)
             (SAVED_DIR / (key + ".thumb-tmp.jpg")).unlink(missing_ok=True)
         except OSError:

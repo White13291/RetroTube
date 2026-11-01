@@ -677,6 +677,31 @@ def saved_thumbnail(key):
     return send_file(image_path, mimetype="image/jpeg", conditional=True, max_age=86400)
 
 
+@app.post("/api/saved/delete/<key>")
+def delete_saved_video(key):
+    denied = require_admin()
+    if denied:
+        return denied
+    if not re.fullmatch(r"[0-9a-f]{32}", key):
+        abort(404)
+    with LOCK:
+        entries = saved_entries()
+        if key not in entries:
+            return json_error("Vídeo salvo não encontrado.", 404)
+        if entries[key].get("status") == "processando":
+            return json_error("Aguarde a conversão terminar antes de excluir.", 409)
+        # Deleting the MP4 also removes the thumbnail and persistent index entry.
+        try:
+            (SAVED_DIR / (key + ".mp4")).unlink(missing_ok=True)
+            saved_thumbnail_path(key).unlink(missing_ok=True)
+            (SAVED_DIR / (key + ".thumb-tmp.jpg")).unlink(missing_ok=True)
+        except OSError:
+            return json_error("Não foi possível apagar o arquivo da VPS.", 500)
+        entries.pop(key)
+        write_saved_entries(entries)
+    return jsonify({"ok": True})
+
+
 @app.get("/api/saved/video/<key>")
 def play_saved_video(key):
     if not re.fullmatch(r"[0-9a-f]{32}", key):

@@ -10,6 +10,10 @@
   var query = document.getElementById("search-query");
   var sourceSelect = document.getElementById("search-source");
   var player = document.getElementById("player");
+  var savedPanel = document.getElementById("saved");
+  var savedList = document.getElementById("saved-list");
+  var saveButton = document.getElementById("save-video");
+  var adminToken = "";
   var qualityPicker = document.getElementById("quality-picker");
   var qualitySelect = document.getElementById("quality-select");
   var currentQuality = 360;
@@ -137,7 +141,77 @@
       return false;
     };
   }
+  function authorizedToken() {
+    if (!adminToken) adminToken = window.prompt("Senha administrativa do RetroTube:", "") || "";
+    return adminToken;
+  }
+  function adminPost(path, body, callback, isUpload) {
+    var token = authorizedToken();
+    if (!token) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", path, true);
+    xhr.setRequestHeader("X-RetroTube-Token", token);
+    if (!isUpload) xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState !== 4) return;
+      var data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (ignore) {}
+      if (xhr.status === 403) adminToken = "";
+      callback(xhr.status >= 200 && xhr.status < 300 ? null :
+        (data.error || "Não foi possível concluir a operação."), data);
+    };
+    xhr.onerror = function () { callback("Falha de conexão com o servidor.", {}); };
+    xhr.send(body);
+  }
+  function showSaved() {
+    message.className = "hide";
+    results.className = "hide";
+    watch.className = "hide";
+    related.className = "panel hide";
+    savedPanel.className = "panel";
+    savedList.textContent = "Carregando vídeos salvos...";
+    backendRequest("/api/saved", function (error, data) {
+      if (param("saved") !== "1") return;
+      savedList.innerHTML = "";
+      if (error) { savedList.textContent = error; return; }
+      var items = data && data.items ? data.items : [];
+      if (!items.length) { savedList.textContent = "Nenhum vídeo salvo ainda."; return; }
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i], row = document.createElement("div");
+        row.className = "saved-item";
+        if (item.status === "pronto") {
+          var link = textNode(row, "a", item.title || "Vídeo salvo");
+          link.href = "?saved_video=" + encodeURIComponent(item.id);
+          interceptInternalLink(link);
+        } else textNode(row, "strong", item.title || "Vídeo");
+        var note = textNode(row, "p", item.status === "processando" ?
+          "Convertendo para o iPad... Atualize a lista em alguns instantes." :
+          item.status === "erro" ? ("Erro: " + (item.message || "falha na conversão")) : "Disponível permanentemente");
+        note.className = "muted";
+        savedList.appendChild(row);
+      }
+    });
+  }
+  function showSavedVideo(key) {
+    savedPanel.className = "hide";
+    message.className = "hide";
+    results.className = "hide";
+    related.className = "panel hide";
+    watch.className = "panel";
+    title.textContent = "Vídeo salvo";
+    status.textContent = "Pronto para reproduzir no iPad.";
+    player.src = "/api/saved/video/" + key;
+    player.load();
+    saveButton.className = "hide";
+    qualityPicker.className = "hide";
+    document.getElementById("youtube-link").className = "hide";
+    document.getElementById("alternate-player").onclick = function () {
+      player.load(); return false;
+    };
+    document.getElementById("back-to-search").href = "?saved=1";
+  }
   function showVideo(id) {
+    savedPanel.className = "hide";
     message.className = "hide";
     results.className = "hide";
     watch.className = "panel";
@@ -149,6 +223,17 @@
     // Keep the original URL only in the "Abrir na plataforma" link below.
     query.value = "";
     title.textContent = param("t").slice(0, 160) || "Vídeo " + id;
+    saveButton.className = "";
+    saveButton.disabled = true;
+    saveButton.textContent = "☆ Salvar vídeo";
+    saveButton.onclick = function () {
+      saveButton.disabled = true;
+      adminPost("/api/save/" + id + "?quality=" + currentQuality,
+        JSON.stringify({ title: title.textContent }), function (error) {
+          if (error) { saveButton.disabled = false; window.alert(error); }
+          else saveButton.textContent = "★ Vídeo salvo";
+        }, false);
+    };
     status.textContent = "Preparando vídeo para o Safari antigo…";
     document.getElementById("youtube-link").className = peer && !original ? "hide" : "";
     player.removeAttribute("src");
@@ -174,6 +259,8 @@
     };
   }
   function showDemo() {
+    saveButton.className = "hide";
+    savedPanel.className = "hide";
     message.className = "hide";
     results.className = "hide";
     watch.className = "panel";
@@ -243,6 +330,8 @@
       if (quality !== 360 && quality !== 480 && quality !== 720 && quality !== 1080) return;
       if (quality === currentQuality) return;
       currentQuality = quality;
+      saveButton.disabled = true;
+      saveButton.textContent = "☆ Salvar vídeo";
       qualityManuallySelected = true;
       if (player.pause) player.pause();
       player.removeAttribute("src");
@@ -265,6 +354,7 @@
     if (!data) { status.textContent = "Servidor não respondeu."; return; }
     if (data.status === "pronto") {
       status.textContent = "Vídeo pronto em " + quality + "p! Toque no botão de reprodução.";
+      saveButton.disabled = false;
       player.src = data.video_url || ("/api/video/" + id + "?quality=" + quality);
       player.load();
       return;
@@ -489,6 +579,7 @@
     };
   }
   function showSearch(q) {
+    savedPanel.className = "hide";
     var startedAt = viewVersion;
     message.className = "hide";
     watch.className = "hide";
@@ -606,6 +697,7 @@
     return false;
   };
   function showHome() {
+    savedPanel.className = "hide";
     message.className = "panel";
     results.className = "panel hide";
     watch.className = "panel hide";
@@ -618,7 +710,11 @@
     player.removeAttribute("src");
     player.load();
     var id = param("v");
-    if (param("demo") === "1") {
+    if (param("saved") === "1") {
+      showSaved();
+    } else if (/^[0-9a-f]{32}$/.test(param("saved_video"))) {
+      showSavedVideo(param("saved_video"));
+    } else if (param("demo") === "1") {
       showDemo();
     } else if (valid(id)) {
       showVideo(id);
@@ -631,6 +727,21 @@
       showHome();
     }
   }
+  document.getElementById("upload-form").onsubmit = function (event) {
+    if (event && event.preventDefault) event.preventDefault();
+    var fileInput = document.getElementById("upload-video");
+    var uploadStatus = document.getElementById("upload-status");
+    if (!fileInput.files || !fileInput.files.length) return false;
+    var form = new FormData();
+    form.append("video", fileInput.files[0]);
+    uploadStatus.textContent = "Enviando vídeo...";
+    adminPost("/api/upload", form, function (error) {
+      uploadStatus.textContent = error || "Enviado! A conversão começou. Atualize esta aba para acompanhar.";
+      if (!error) showSaved();
+    }, true);
+    return false;
+  };
+  interceptInternalLink(document.getElementById("saved-link"));
   interceptInternalLink(document.getElementById("home-link"));
   interceptInternalLink(document.getElementById("demo-link"));
   interceptInternalLink(document.getElementById("watch-demo-link"));

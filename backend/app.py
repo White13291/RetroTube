@@ -474,6 +474,29 @@ def quality_video_url(identifier: str, quality: int) -> str:
     return "/api/video/" + identifier + "?quality=" + str(quality)
 
 
+def has_audio_stream(path: Path) -> bool:
+    """Reject video-only files before serving or caching."""
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=codec_type", "-of", "default=nw=1:nk=1", str(path)],
+        capture_output=True, text=True, timeout=20
+    )
+    return probe.returncode == 0 and "audio" in probe.stdout.splitlines()
+
+
+def cached_video_ready(identifier: str, quality: int) -> bool:
+    path = quality_path(identifier, quality)
+    if not path.is_file():
+        return False
+    try:
+        if path.stat().st_size > 0 and has_audio_stream(path):
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    path.unlink(missing_ok=True)
+    return False
+
+
 def cache_cleanup():
     """Remove oldest completed files when the configured size is exceeded."""
     files = sorted(VIDEO_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime)
@@ -906,9 +929,9 @@ def prepare_video(identifier: str, quality: int = 360):
         url = ("https://www.dailymotion.com/video/" + dm_match.group(1)
                if dm_match else "https://www.youtube.com/watch?v=" + identifier)
         opts = {
-            "format": ("bv*[height<=480]+ba/b[height<=480]/b" if quality == 360 else
-                       f"bv*[height={quality}]+ba/b[height={quality}]/"
-                       f"bv*[height>={quality}][height<=1080]+ba/b[height>={quality}][height<=1080]"),
+            "format": ("bv[height<=480]+ba/b[height<=480]" if quality == 360 else
+                       f"bv[height={quality}]+ba/b[height={quality}]/"
+                       f"bv[height>={quality}][height<=1080]+ba/b[height>={quality}][height<=1080]"),
             "outtmpl": str(work / "source.%(ext)s"),
             "merge_output_format": "mkv",
             "noplaylist": True, "quiet": True, "no_warnings": True,
@@ -930,6 +953,8 @@ def prepare_video(identifier: str, quality: int = 360):
                 candidates = [p for p in work.iterdir() if p.is_file() and p.suffix.lower() in (".mkv", ".mp4", ".webm", ".m4v")]
                 if candidates:
                     source = max(candidates, key=lambda p: p.stat().st_size)
+                    if not has_audio_stream(source):
+                        source = None
             except ValueError:
                 raise
             except Exception as error:
@@ -946,11 +971,14 @@ def prepare_video(identifier: str, quality: int = 360):
                     source = piped_video(identifier, work, quality=quality)
                 except RuntimeError as piped_error:
                     raise RuntimeError(str(invidious_error) + " | " + str(piped_error)) from piped_error
+        if not has_audio_stream(source):
+            raise RuntimeError("A fonte de vídeo não possui faixa de áudio.")
         set_job(identifier, "convertendo", quality=quality)
         output = work / "ready.mp4"
         command = [
             "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
             # iOS 8 hardware decoders are happier with 30 fps H.264 baseline.
+            "-map", "0:v:0", "-map", "0:a:0",
             "-vf", f"scale=-2:{quality},fps=30",
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27",
             "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level",
@@ -961,6 +989,8 @@ def prepare_video(identifier: str, quality: int = 360):
         finished = subprocess.run(command, capture_output=True, text=True, timeout=2400)
         if finished.returncode or not output.exists() or output.stat().st_size == 0:
             raise RuntimeError("A conversão MP4 falhou: " + finished.stderr[-300:])
+        if not has_audio_stream(output):
+            raise RuntimeError("O MP4 convertido ficou sem áudio.")
         os.replace(output, quality_path(identifier, quality))
         set_job(identifier, "pronto", quality=quality)
     except Exception as error:
@@ -1084,7 +1114,7 @@ def search():
 def prepare(identifier):
     identifier = valid_id(identifier)
     quality = requested_quality()
-    if quality_path(identifier, quality).is_file():
+    if cached_video_ready(identifier, quality):
         return jsonify({"status": "pronto", "video_url": quality_video_url(identifier, quality)})
     check_rate_limit("prepare", 12)
     with LOCK:
@@ -1104,7 +1134,7 @@ def prepare(identifier):
 def status(identifier):
     identifier = valid_id(identifier)
     quality = requested_quality()
-    if quality_path(identifier, quality).is_file():
+    if cached_video_ready(identifier, quality):
         return jsonify({"status": "pronto", "video_url": quality_video_url(identifier, quality)})
     with LOCK:
         job = JOBS.get(quality_job(identifier, quality))
@@ -1116,8 +1146,8 @@ def status(identifier):
 @app.get("/api/video/<identifier>")
 def video(identifier):
     path = quality_path(valid_id(identifier), requested_quality())
-    if not path.is_file():
-        return json_error("Vídeo ainda não está pronto", 404)
+    if not cached_video_ready(valid_id(identifier), requested_quality()):
+        return json_error("Vídeo precisa ser preparado novamente para restaurar o áudio", 404)
     # Flask/Werkzeug handles Range/206 for iOS Safari's native MP4 player.
     return send_file(path, mimetype="video/mp4", conditional=True, max_age=86400)
 

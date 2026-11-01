@@ -13,6 +13,7 @@ services:
       RETROTUBE_MAX_ACTIVE_JOBS: "1"
       RETROTUBE_MAX_QUEUE: "4"
       RETROTUBE_MAX_CACHE_GB: "3"
+      RETROTUBE_ADMIN_TOKEN: ${RETROTUBE_ADMIN_TOKEN:-}
     volumes:
       - retrotube-cache:/data
     mem_limit: 1536m

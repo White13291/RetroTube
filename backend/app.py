@@ -646,6 +646,37 @@ def upload_saved_video():
     return jsonify({"ok": True, "id": key, "status": "processando"})
 
 
+def saved_thumbnail_path(key: str) -> Path:
+    return SAVED_DIR / (key + ".jpg")
+
+
+@app.get("/api/saved/thumb/<key>")
+def saved_thumbnail(key):
+    """Generate a small JPEG from the saved MP4, including older saved videos."""
+    if not re.fullmatch(r"[0-9a-f]{32}", key):
+        abort(404)
+    image_path = saved_thumbnail_path(key)
+    video_path = SAVED_DIR / (key + ".mp4")
+    if not video_path.is_file():
+        abort(404)
+    with LOCK:
+        if not image_path.is_file() or image_path.stat().st_size == 0:
+            temporary = SAVED_DIR / (key + ".thumb-tmp.jpg")
+            command = [
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                "-ss", "1", "-i", str(video_path), "-frames:v", "1",
+                "-vf", "scale=320:-2", "-q:v", "5", str(temporary)
+            ]
+            try:
+                result = subprocess.run(command, capture_output=True, timeout=30)
+                if result.returncode != 0 or not temporary.is_file() or temporary.stat().st_size == 0:
+                    abort(404)
+                os.replace(temporary, image_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+    return send_file(image_path, mimetype="image/jpeg", conditional=True, max_age=86400)
+
+
 @app.get("/api/saved/video/<key>")
 def play_saved_video(key):
     if not re.fullmatch(r"[0-9a-f]{32}", key):

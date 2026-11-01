@@ -203,6 +203,11 @@
           "Convertendo para o iPad..." :
           item.status === "erro" ? ("Erro: " + (item.message || "falha na conversão")) : "Vídeo salvo");
         note.className = "muted";
+        if (item.original) {
+          var originalLink = textNode(row, "a", "Baixar MP4 original");
+          originalLink.href = "/api/saved/original/" + encodeURIComponent(item.id);
+          originalLink.className = "saved-original";
+        }
         if (item.status !== "processando") {
           var remove = textNode(row, "button", "Excluir vídeo");
           remove.type = "button";
@@ -764,13 +769,84 @@
     var fileInput = document.getElementById("upload-video");
     var uploadStatus = document.getElementById("upload-status");
     if (!fileInput.files || !fileInput.files.length) return false;
-    var form = new FormData();
-    form.append("video", fileInput.files[0]);
-    uploadStatus.textContent = "Enviando vídeo...";
-    adminPost("/api/upload", form, function (error) {
-      uploadStatus.textContent = error || "Enviado! A conversão começou. Atualize esta aba para acompanhar.";
-      if (!error) showSaved();
-    }, true);
+    var file = fileInput.files[0];
+    if (!/\.mp4$/i.test(file.name) || file.size < 1 || file.size > 5 * 1024 * 1024 * 1024) {
+      uploadStatus.textContent = "Selecione um arquivo MP4 de até 5 GB.";
+      return false;
+    }
+    if (!file.slice && !file.webkitSlice) {
+      uploadStatus.textContent = "Use um navegador atualizado no computador para enviar arquivos grandes.";
+      return false;
+    }
+    var submit = document.querySelector("#upload-form button");
+    submit.disabled = true;
+    var resumeKey = "retrotube_upload_" + file.name + "_" + file.size + "_" + (file.lastModified || 0);
+    var previousId = "";
+    try { previousId = localStorage.getItem(resumeKey) || ""; } catch (ignore) {}
+    uploadStatus.textContent = "Preparando envio...";
+    adminPost("/api/upload/init", JSON.stringify({
+      name: file.name, size: file.size, resume_id: previousId
+    }), function (error, data) {
+      if (error) { uploadStatus.textContent = error; submit.disabled = false; return; }
+      var chunkSize = data.chunk_size, id = data.id, count = Math.ceil(file.size / chunkSize);
+      try { localStorage.setItem(resumeKey, id); } catch (ignore) {}
+      var already = {}, missing = [], i;
+      for (i = 0; i < (data.received || []).length; i++) already[data.received[i]] = true;
+      for (i = 0; i < count; i++) if (!already[i]) missing.push(i);
+      var next = 0, active = 0, finished = count - missing.length, failed = false, completing = false;
+      function progress() {
+        uploadStatus.textContent = "Enviando vídeo: " + Math.floor(finished * 100 / count) +
+          "% (" + finished + " de " + count + " partes)";
+      }
+      function fail(message) {
+        if (failed) return;
+        failed = true;
+        submit.disabled = false;
+        uploadStatus.textContent = message + " Selecione o mesmo arquivo novamente para retomar.";
+      }
+      function finishUpload() {
+        if (completing || failed) return;
+        completing = true;
+        uploadStatus.textContent = "Envio concluído. Registrando vídeo...";
+        adminPost("/api/upload/complete/" + id, "{}", function (finishError) {
+          if (finishError) { fail(finishError); return; }
+          try { localStorage.removeItem(resumeKey); } catch (ignore) {}
+          submit.disabled = false;
+          uploadStatus.textContent = "Upload concluído! Preparando reprodução no iPad.";
+          showSaved();
+        }, false);
+      }
+      function sendChunk(index, attempt) {
+        var start = index * chunkSize;
+        var blob = (file.slice || file.webkitSlice).call(file, start, Math.min(file.size, start + chunkSize));
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/upload/chunk/" + id + "/" + index, true);
+        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState !== 4 || failed) return;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            active--; finished++; progress(); pump();
+          } else if (attempt < 3 && xhr.status !== 401 && xhr.status !== 403) {
+            setTimeout(function () { sendChunk(index, attempt + 1); }, 1000 * (attempt + 1));
+          } else {
+            if (xhr.status === 401 || xhr.status === 403) { location.href = "/login"; return; }
+            fail("Falha ao enviar uma parte do arquivo.");
+          }
+        };
+        xhr.send(blob);
+      }
+      function pump() {
+        if (failed) return;
+        while (active < 3 && next < missing.length) {
+          active++;
+          sendChunk(missing[next++], 0);
+        }
+        if (active === 0 && next === missing.length) finishUpload();
+      }
+      progress();
+      pump();
+    }, false);
     return false;
   };
   interceptInternalLink(document.getElementById("saved-link"));

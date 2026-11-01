@@ -10,6 +10,28 @@
   var query = document.getElementById("search-query");
   var sourceSelect = document.getElementById("search-source");
   var player = document.getElementById("player");
+  var loopButton = document.getElementById("loop-toggle");
+  var loopEnabled = false;
+  try { loopEnabled = localStorage.getItem("retrotube_video_loop") === "yes"; } catch (ignore) {}
+  function applyVideoLoop() {
+    player.loop = loopEnabled;
+    if (loopEnabled) player.setAttribute("loop", "loop");
+    else player.removeAttribute("loop");
+    loopButton.textContent = loopEnabled ? "↻ Repetir: ligado" : "↻ Repetir: desligado";
+    loopButton.className = loopEnabled ? "loop-toggle enabled" : "loop-toggle";
+    loopButton.setAttribute("aria-pressed", loopEnabled ? "true" : "false");
+  }
+  loopButton.onclick = function () {
+    loopEnabled = !loopEnabled;
+    try { localStorage.setItem("retrotube_video_loop", loopEnabled ? "yes" : "no"); } catch (ignore) {}
+    applyVideoLoop();
+  };
+  player.onended = function () {
+    if (!loopEnabled) return;
+    try { player.currentTime = 0; } catch (ignore) {}
+    try { player.play(); } catch (ignore) {}
+  };
+  applyVideoLoop();
   var savedPanel = document.getElementById("saved");
   var savedList = document.getElementById("saved-list");
   var saveButton = document.getElementById("save-video");

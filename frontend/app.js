@@ -179,14 +179,33 @@
       for (var i = 0; i < items.length; i++) {
         var item = items[i], row = document.createElement("div");
         row.className = "saved-item";
+        row.className = "item";
+        var thumbLink = document.createElement(item.status === "pronto" ? "a" : "div");
+        var href = "?saved_video=" + encodeURIComponent(item.id) +
+          "&t=" + encodeURIComponent(item.title || "Vídeo salvo");
         if (item.status === "pronto") {
-          var link = textNode(row, "a", item.title || "Vídeo salvo");
-          link.href = "?saved_video=" + encodeURIComponent(item.id);
+          thumbLink.href = href;
+          interceptInternalLink(thumbLink);
+        }
+        var image = document.createElement("img");
+        image.className = "thumb";
+        image.src = item.status === "pronto" ? "/api/saved/thumb/" + encodeURIComponent(item.id) : "logo.png";
+        image.alt = "Capa de " + (item.title || "Vídeo salvo");
+        image.width = 320;
+        image.height = 180;
+        image.onerror = function () { this.onerror = null; this.src = "logo.png"; };
+        thumbLink.appendChild(image);
+        row.appendChild(thumbLink);
+        var heading = document.createElement("h2");
+        if (item.status === "pronto") {
+          var link = textNode(heading, "a", item.title || "Vídeo salvo");
+          link.href = href;
           interceptInternalLink(link);
-        } else textNode(row, "strong", item.title || "Vídeo");
+        } else textNode(heading, "span", item.title || "Vídeo");
+        row.appendChild(heading);
         var note = textNode(row, "p", item.status === "processando" ?
-          "Convertendo para o iPad... Atualize a lista em alguns instantes." :
-          item.status === "erro" ? ("Erro: " + (item.message || "falha na conversão")) : "Disponível permanentemente");
+          "Convertendo para o iPad..." :
+          item.status === "erro" ? ("Erro: " + (item.message || "falha na conversão")) : "Vídeo salvo");
         note.className = "muted";
         savedList.appendChild(row);
       }
@@ -198,7 +217,7 @@
     results.className = "hide";
     related.className = "panel hide";
     watch.className = "panel";
-    title.textContent = "Vídeo salvo";
+    title.textContent = param("t").slice(0, 160) || "Vídeo salvo";
     status.textContent = "Pronto para reproduzir no iPad.";
     player.src = "/api/saved/video/" + key;
     player.load();

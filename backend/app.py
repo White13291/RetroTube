@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import hmac
+import uuid
 import ipaddress
 import os
 import re
@@ -34,6 +36,12 @@ MAX_ACTIVE_JOBS = int(os.getenv("RETROTUBE_MAX_ACTIVE_JOBS", "2"))
 MAX_QUEUE = int(os.getenv("RETROTUBE_MAX_QUEUE", "8"))
 MAX_CACHE_GB = float(os.getenv("RETROTUBE_MAX_CACHE_GB", "3"))
 MAX_SOURCE_BYTES = 250 * 1024 * 1024
+CACHE_TTL_SECONDS = 72 * 3600
+SAVED_DIR = VIDEO_DIR / "saved"
+SAVED_DIR.mkdir(parents=True, exist_ok=True)
+SAVED_INDEX = SAVED_DIR / "index.json"
+ADMIN_TOKEN = os.getenv("RETROTUBE_ADMIN_TOKEN", "")
+app.config["MAX_CONTENT_LENGTH"] = MAX_SOURCE_BYTES
 ALLOWED_ORIGIN = os.getenv("RETROTUBE_FRONTEND_ORIGIN", "https://white13291.github.io").rstrip("/")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 DAILYMOTION_ID = re.compile(r"^dailymotion_([A-Za-z0-9]{5,14})$")
@@ -498,19 +506,154 @@ def cached_video_ready(identifier: str, quality: int) -> bool:
 
 
 def cache_cleanup():
-    """Remove oldest completed files when the configured size is exceeded."""
+    """Expire downloads after 72 hours; saved files live outside this directory."""
     files = sorted(VIDEO_DIR.glob("*.mp4"), key=lambda p: p.stat().st_mtime)
     limit = int(MAX_CACHE_GB * 1024**3)
+    now = time.time()
     total = sum(p.stat().st_size for p in files)
     for file in files:
-        if total <= limit:
-            break
         try:
-            size = file.stat().st_size
-            file.unlink()
-            total -= size
+            age = now - file.stat().st_mtime
+            if age >= CACHE_TTL_SECONDS or total > limit:
+                size = file.stat().st_size
+                file.unlink()
+                total -= size
         except OSError:
             pass
+
+
+def cache_housekeeper():
+    while True:
+        try:
+            cache_cleanup()
+        except Exception as error:
+            app.logger.warning("Limpeza de cache: %s", type(error).__name__)
+        threading.Event().wait(3600)
+
+
+threading.Thread(target=cache_housekeeper, daemon=True, name="retrotube-cleanup").start()
+
+
+def saved_entries():
+    try:
+        data = json.loads(SAVED_INDEX.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_saved_entries(entries):
+    temp = SAVED_DIR / "index.tmp"
+    temp.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+    os.replace(temp, SAVED_INDEX)
+
+
+def require_admin():
+    if not ADMIN_TOKEN or not hmac.compare_digest(
+        request.headers.get("X-RetroTube-Token", ""), ADMIN_TOKEN
+    ):
+        return json_error("Senha administrativa inválida ou não configurada na VPS.", 403)
+    return None
+
+
+@app.get("/api/saved")
+def list_saved_videos():
+    with LOCK:
+        entries = saved_entries()
+    return jsonify({"items": [
+        {"id": key, "title": entry.get("title", "Vídeo salvo"),
+         "status": entry.get("status", "pronto"), "message": entry.get("message", "")}
+        for key, entry in reversed(list(entries.items()))
+        if (SAVED_DIR / (key + ".mp4")).is_file() or entry.get("status") == "processando"
+    ]})
+
+
+@app.post("/api/save/<identifier>")
+def save_video(identifier):
+    denied = require_admin()
+    if denied:
+        return denied
+    identifier = valid_id(identifier)
+    quality = requested_quality()
+    source = quality_path(identifier, quality)
+    if not cached_video_ready(identifier, quality):
+        return json_error("Aguarde o download terminar antes de salvar.", 409)
+    title = str((request.get_json(silent=True) or {}).get("title", "Vídeo salvo"))[:160]
+    key = uuid.uuid4().hex
+    with LOCK:
+        shutil.copyfile(source, SAVED_DIR / (key + ".mp4"))
+        entries = saved_entries()
+        entries[key] = {"title": title, "status": "pronto"}
+        write_saved_entries(entries)
+    return jsonify({"ok": True, "id": key})
+
+
+def process_uploaded_video(key, source):
+    try:
+        if not has_audio_stream(source):
+            raise ValueError("Arquivo sem faixa de áudio.")
+        output = SAVED_DIR / (key + ".mp4")
+        command = [
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(source), "-map", "0:v:0", "-map", "0:a:0",
+            "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27",
+            "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.0",
+            "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-movflags", "+faststart",
+            str(output)
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=2400)
+        if result.returncode or not output.is_file() or not has_audio_stream(output):
+            raise RuntimeError("Não foi possível converter este vídeo para o iPad.")
+        with LOCK:
+            entries = saved_entries()
+            if key in entries:
+                entries[key]["status"] = "pronto"
+                write_saved_entries(entries)
+    except Exception as error:
+        (SAVED_DIR / (key + ".mp4")).unlink(missing_ok=True)
+        with LOCK:
+            entries = saved_entries()
+            if key in entries:
+                entries[key]["status"] = "erro"
+                entries[key]["message"] = str(error)[:160]
+                write_saved_entries(entries)
+    finally:
+        source.unlink(missing_ok=True)
+
+
+@app.post("/api/upload")
+def upload_saved_video():
+    denied = require_admin()
+    if denied:
+        return denied
+    upload = request.files.get("video")
+    if not upload or not upload.filename.lower().endswith(".mp4"):
+        return json_error("Selecione um arquivo MP4.", 400)
+    key = uuid.uuid4().hex
+    source = SAVED_DIR / (key + ".upload")
+    upload.save(source)
+    if not source.stat().st_size:
+        source.unlink(missing_ok=True)
+        return json_error("Arquivo vazio.", 400)
+    title = str(request.form.get("title") or upload.filename)[:160]
+    with LOCK:
+        entries = saved_entries()
+        entries[key] = {"title": title, "status": "processando"}
+        write_saved_entries(entries)
+    threading.Thread(target=process_uploaded_video, args=(key, source), daemon=True).start()
+    return jsonify({"ok": True, "id": key, "status": "processando"})
+
+
+@app.get("/api/saved/video/<key>")
+def play_saved_video(key):
+    if not re.fullmatch(r"[0-9a-f]{32}", key):
+        abort(404)
+    path = SAVED_DIR / (key + ".mp4")
+    if not path.is_file():
+        abort(404)
+    return send_file(path, mimetype="video/mp4", conditional=True, max_age=86400)
+
 
 
 def set_job(identifier: str, status: str, quality: int = 360, **kwargs):

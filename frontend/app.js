@@ -13,7 +13,6 @@
   var savedPanel = document.getElementById("saved");
   var savedList = document.getElementById("saved-list");
   var saveButton = document.getElementById("save-video");
-  var adminToken = "";
   var qualityPicker = document.getElementById("quality-picker");
   var qualitySelect = document.getElementById("quality-select");
   var currentQuality = 360;
@@ -141,22 +140,19 @@
       return false;
     };
   }
-  function authorizedToken() {
-    if (!adminToken) adminToken = window.prompt("Senha administrativa do RetroTube:", "") || "";
-    return adminToken;
-  }
   function adminPost(path, body, callback, isUpload) {
-    var token = authorizedToken();
-    if (!token) return;
     var xhr = new XMLHttpRequest();
     xhr.open("POST", path, true);
-    xhr.setRequestHeader("X-RetroTube-Token", token);
+    xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
     if (!isUpload) xhr.setRequestHeader("Content-Type", "application/json");
     xhr.onreadystatechange = function () {
       if (xhr.readyState !== 4) return;
       var data = {};
       try { data = JSON.parse(xhr.responseText); } catch (ignore) {}
-      if (xhr.status === 403) adminToken = "";
+      if (xhr.status === 401 || xhr.status === 403) {
+        location.href = "/login";
+        return;
+      }
       callback(xhr.status >= 200 && xhr.status < 300 ? null :
         (data.error || "Não foi possível concluir a operação."), data);
     };
@@ -214,7 +210,6 @@
           (function (savedId, savedTitle, button) {
             button.onclick = function () {
               if (!window.confirm('Excluir "' + savedTitle + '"? O arquivo MP4 será apagado da VPS permanentemente.')) return;
-              if (!authorizedToken()) return;
               button.disabled = true;
               adminPost("/api/saved/delete/" + encodeURIComponent(savedId), "{}", function (error) {
                 if (error) {

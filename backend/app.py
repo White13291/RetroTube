@@ -634,6 +634,8 @@ def recover_interrupted_saved_jobs():
         for key, entry in entries.items():
             if entry.get("status") != "processando":
                 continue
+            # Incomplete conversion output is not a playable video.
+            (SAVED_DIR / (key + ".processing.mp4")).unlink(missing_ok=True)
             if (SAVED_DIR / (key + ".mp4")).is_file() and not (SAVED_DIR / (key + ".original.mp4")).is_file():
                 entry["status"] = "pronto"
             else:

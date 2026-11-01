@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import secrets
 import uuid
 import ipaddress
 import os
@@ -20,7 +21,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from flask import Flask, abort, jsonify, request, send_file, send_from_directory
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory, redirect, session
 
 try:
     from yt_dlp import YoutubeDL
@@ -41,6 +42,17 @@ SAVED_DIR = VIDEO_DIR / "saved"
 SAVED_DIR.mkdir(parents=True, exist_ok=True)
 SAVED_INDEX = SAVED_DIR / "index.json"
 ADMIN_TOKEN = os.getenv("RETROTUBE_ADMIN_TOKEN", "")
+# Persistent random signing key, distinct from the user's login password.
+SESSION_KEY_PATH = VIDEO_DIR / ".session-signing-key"
+try:
+    if not SESSION_KEY_PATH.is_file():
+        SESSION_KEY_PATH.write_bytes(secrets.token_bytes(32))
+        SESSION_KEY_PATH.chmod(0o600)
+    app.secret_key = SESSION_KEY_PATH.read_bytes()
+except OSError:
+    app.secret_key = secrets.token_bytes(32)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  SESSION_COOKIE_SECURE=False, PERMANENT_SESSION_LIFETIME=86400)
 app.config["MAX_CONTENT_LENGTH"] = MAX_SOURCE_BYTES
 ALLOWED_ORIGIN = os.getenv("RETROTUBE_FRONTEND_ORIGIN", "https://white13291.github.io").rstrip("/")
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -434,6 +446,60 @@ def json_error(message: str, status: int):
     return jsonify({"error": message}), status
 
 
+LOGIN_HTML = """<!doctype html><html lang="pt-br"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar no RetroTube</title><style>
+body{background:#141519;color:#fff;font:16px Arial,sans-serif;margin:0;padding:30px}
+main{max-width:350px;margin:11vh auto;background:#24262d;padding:28px;border-radius:14px}
+h1{margin-top:0}p{color:#c9cbd1;line-height:1.5}
+input,button{box-sizing:border-box;display:block;width:100%;padding:13px;margin:13px 0;border-radius:8px;font-size:16px}
+input{background:#fff;border:1px solid #ccc}button{background:#e52b35;color:white;border:0;font-weight:bold}
+.error{color:#ffb1b6}</style></head><body><main>
+<h1>RetroTube</h1><p>Digite a senha para entrar. Você não precisará digitá-la novamente durante esta sessão.</p>
+<form method="post" action="/login"><label for="password">Senha de acesso</label>
+<input id="password" name="password" type="password" required autocomplete="current-password">
+<button type="submit">Entrar</button></form>
+<!--ERROR-->
+</main></body></html>"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not ADMIN_TOKEN:
+        return "Configure RETROTUBE_ADMIN_TOKEN na VPS antes de acessar.", 503
+    if request.method == "POST":
+        check_rate_limit("login", 8, 600)
+        supplied = request.form.get("password", "")
+        if hmac.compare_digest(supplied, ADMIN_TOKEN):
+            session.clear()
+            session["retrotube_auth"] = True
+            session.permanent = False
+            return redirect("/")
+        return LOGIN_HTML.replace("<!--ERROR-->", '<p class="error">Senha incorreta.</p>'), 401
+    if session.get("retrotube_auth"):
+        return redirect("/")
+    return LOGIN_HTML.replace("<!--ERROR-->", "")
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.before_request
+def require_site_login():
+    if request.path in ("/login", "/logout"):
+        return None
+    if not ADMIN_TOKEN:
+        return "Configure RETROTUBE_ADMIN_TOKEN na VPS antes de acessar.", 503
+    if session.get("retrotube_auth"):
+        return None
+    if request.path.startswith("/api/"):
+        return json_error("Faça login no RetroTube para continuar.", 401)
+    return redirect("/login")
+
+
 @app.after_request
 def security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -550,10 +616,10 @@ def write_saved_entries(entries):
 
 
 def require_admin():
-    if not ADMIN_TOKEN or not hmac.compare_digest(
-        request.headers.get("X-RetroTube-Token", ""), ADMIN_TOKEN
-    ):
-        return json_error("Senha administrativa inválida ou não configurada na VPS.", 403)
+    # The site-wide login already authenticated this browser session.
+    # A custom XHR header prevents a third-party HTML form from triggering writes.
+    if not session.get("retrotube_auth") or request.headers.get("X-Requested-With") != "XMLHttpRequest":
+        return json_error("Sessão inválida. Entre novamente no RetroTube.", 403)
     return None
 
 

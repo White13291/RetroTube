@@ -28,6 +28,9 @@
     .search button{height:42px;width:22%;padding:9px 6px;vertical-align:top}
     .search-tools{margin:9px 0 0;font-size:12px;color:#8b8d93}
     .search-tools a{color:#6c6e75}
+    .logout{clear:both;text-align:right;margin:8px 0 0}
+    .logout button{background:transparent;color:#b51e28;padding:5px 9px;font-size:12px}
+    body.dark .logout button{color:#ff717b}
     .api-box{clear:both;margin:16px 0 0 224px;padding:15px;background:#fff8ef;border:1px solid #f2d9b2;border-radius:10px}
     .api-box input{width:68%;max-width:490px;padding:10px;background:#fff;border:1px solid #d5d5d5;border-radius:7px;font:15px Arial}
     .api-box h2{margin:0 0 6px}
@@ -141,6 +144,7 @@
         <button type="submit">Buscar vídeos</button>
         <p class="search-tools"><a id="api-settings-link" href="#api-settings">Configurar YouTube (opcional)</a> &bull; <a id="lite-search" href="https://lite.duckduckgo.com/lite/">Busca alternativa</a></p>
       </form>
+      <form class="logout" action="/logout" method="post"><button type="submit">Sair do RetroTube</button></form>
       <div id="api-settings" class="api-box hide">
         <h2>Configurar pesquisa oficial do YouTube</h2>
         <p class="muted">Insira sua chave da YouTube Data API v3. Ela fica somente neste navegador e não é enviada ao GitHub. Restrinja a chave à API do YouTube e ao endereço deste site no Google Cloud.</p>
@@ -194,6 +198,6 @@
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

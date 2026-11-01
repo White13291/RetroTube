@@ -409,8 +409,9 @@ def piped_video(identifier: str, work: Path, quality: int = 360) -> Path:
                     if total > MAX_SOURCE_BYTES:
                         raise ValueError("O arquivo excede 250 MB")
                     target.write(chunk)
-            if source.stat().st_size > 0:
+            if source.stat().st_size > 0 and has_audio_stream(source):
                 return source
+            raise ValueError("Vídeo recebido sem faixa de áudio")
         except HTTPError as error:
             failures.append(name + ": HTTP " + str(error.code))
         except (TimeoutError, URLError):
@@ -767,6 +768,11 @@ def peertube_file_choices(details: dict):
     return selected[:30]
 
 
+def peertube_media_signature(data: bytes) -> bool:
+    """Recognize MP4/WebM bytes even if PeerTube sends a generic download MIME."""
+    return (len(data) >= 12 and data[4:8] == b"ftyp") or data.startswith(b"\x1a\x45\xdf\xa3")
+
+
 def peertube_media_alive(url: str, timeout: int = 5) -> bool:
     """Try a tiny HTTP range before advertising a video; 404 means unusable."""
     if not peertube_public_network(url):
@@ -777,8 +783,8 @@ def peertube_media_alive(url: str, timeout: int = 5) -> bool:
                                     "Range": "bytes=0-1023"})
         with PEERTUBE_OPENER.open(req, timeout=timeout) as remote:
             mime = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if not (mime.startswith("video/") or mime in ("application/octet-stream", "binary/octet-stream")):
-                return False
+            # Do not trust Content-Type: some PeerTube servers use
+            # application/force-download for real MP4 files.
             # A partial (206) response can advertise the full size in Content-Range.
             content_range = str(remote.headers.get("Content-Range") or "")
             full_size = re.search(r"/(\d+)$", content_range)
@@ -787,7 +793,7 @@ def peertube_media_alive(url: str, timeout: int = 5) -> bool:
             length = remote.headers.get("Content-Length")
             if length and int(length) > MAX_SOURCE_BYTES:
                 return False
-            return bool(remote.read(32))
+            return peertube_media_signature(remote.read(512))
     except (OSError, ValueError, URLError, HTTPError, TimeoutError):
         return False
 
@@ -990,14 +996,36 @@ def peertube_video(identifier: str, work: Path, quality: int = 360) -> Path:
         video_title = str(details.get("name") or "Vídeo")[:160]
     else:
         video_title = cached["title"]
+    # Cached verification often contains only one URL. Include the other
+    # indexed files so a broken download endpoint cannot block playback.
+    with LOCK:
+        try:
+            peer_index = json.loads(PEERTUBE_INDEX.read_text(encoding="utf-8"))
+            indexed = peer_index.get(identifier, {}) if isinstance(peer_index, dict) else {}
+        except (OSError, ValueError):
+            indexed = {}
+    for candidate in (indexed.get("candidates") or []) if isinstance(indexed, dict) else []:
+        if not isinstance(candidate, dict):
+            continue
+        try:
+            height = int(candidate.get("height") or 0)
+            candidate_url = str(candidate.get("url") or "")
+        except (TypeError, ValueError):
+            continue
+        if 0 < height <= 1080 and peertube_public_url(candidate_url) and (height, candidate_url) not in choices:
+            choices.append((height, candidate_url))
     if quality > 360:
         choices = [(h, url) for h, url in choices if h >= quality]
         choices.sort(key=lambda item: item[0] - quality)
     if not choices:
         raise ValueError("Este vídeo PeerTube não oferece fonte pública nesta resolução")
     errors = []
-    # Retry the smallest preferred source once after trying alternatives.
-    for _, url in (choices[:5] + choices[:1]):
+    # Try all indexed alternatives; skip duplicate URLs.
+    seen_urls = set()
+    for _, url in choices[:16]:
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
         source = work / ("peertube-source" + (".webm" if urlsplit(url).path.lower().endswith(".webm") else ".mp4"))
         try:
             if not peertube_public_network(url):
@@ -1006,14 +1034,18 @@ def peertube_video(identifier: str, work: Path, quality: int = 360) -> Path:
             req = Request(url, headers={"User-Agent": "RetroTube/1.0", "Accept": "video/*"})
             with PEERTUBE_OPENER.open(req, timeout=35) as remote:
                 content_type = (remote.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-                if not (content_type.startswith("video/") or content_type == "application/octet-stream"):
-                    raise ValueError("Fonte não retornou um arquivo de vídeo")
+                # Some real MP4 downloads have Content-Type application/force-download.
+                # Verify the file signature instead of rejecting by header alone.
+                first_block = remote.read(512)
+                if not peertube_media_signature(first_block):
+                    raise ValueError("Fonte retornou dados que não são MP4/WebM")
                 length = remote.headers.get("Content-Length")
                 if length and int(length) > MAX_SOURCE_BYTES:
                     raise ValueError("Vídeo excede 250 MB")
-                transferred = 0
+                transferred = len(first_block)
                 started = time.monotonic()
                 with source.open("wb") as target:
+                    target.write(first_block)
                     while True:
                         if time.monotonic() - started > 300:
                             raise TimeoutError("Transferência muito lenta")

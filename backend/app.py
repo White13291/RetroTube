@@ -626,6 +626,27 @@ def write_saved_entries(entries):
     os.replace(temp, SAVED_INDEX)
 
 
+def recover_interrupted_saved_jobs():
+    """A container restart stops transcoding threads, but not their JSON status."""
+    with LOCK:
+        entries = saved_entries()
+        changed = False
+        for key, entry in entries.items():
+            if entry.get("status") != "processando":
+                continue
+            if (SAVED_DIR / (key + ".mp4")).is_file() and not (SAVED_DIR / (key + ".original.mp4")).is_file():
+                entry["status"] = "pronto"
+            else:
+                entry["status"] = "erro"
+                entry["message"] = "Preparação interrompida. Use Otimizar para o iPad novamente."
+            changed = True
+        if changed:
+            write_saved_entries(entries)
+
+
+recover_interrupted_saved_jobs()
+
+
 def require_admin():
     # The site-wide login already authenticated this browser session.
     # A custom XHR header prevents a third-party HTML form from triggering writes.
@@ -694,7 +715,7 @@ def process_uploaded_video(key, source):
             video.get("codec_name") == "h264" and
             int(video.get("width") or 0) <= 1920 and
             int(video.get("height") or 0) <= 1080 and
-            0 < frame_rate <= 30.1 and
+            # Keep 60 FPS too: remuxing is dramatically faster than encoding.
             (not audio or audio.get("codec_name") == "aac")
         )
         if compatible:
@@ -711,7 +732,7 @@ def process_uploaded_video(key, source):
                 "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
                 "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
                 "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "21",
                 "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.0",
                 "-c:a", "aac", "-b:a", "160k", "-ac", "2",
                 "-movflags", "+faststart", str(staging)

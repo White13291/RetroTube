@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from fractions import Fraction
 import hmac
 import secrets
 import uuid
@@ -640,7 +641,8 @@ def list_saved_videos():
     return jsonify({"items": [
         {"id": key, "title": entry.get("title", "Vídeo salvo"),
          "status": entry.get("status", "pronto"), "message": entry.get("message", ""),
-         "original": (SAVED_DIR / (key + ".original.mp4")).is_file()}
+         "original": (SAVED_DIR / (key + ".original.mp4")).is_file(),
+         "optimized": bool(entry.get("optimized"))}
         for key, entry in reversed(list(entries.items()))
         if ((SAVED_DIR / (key + ".mp4")).is_file() or
             (SAVED_DIR / (key + ".original.mp4")).is_file() or
@@ -669,9 +671,11 @@ def save_video(identifier):
 
 
 def process_uploaded_video(key, source):
-    """Keep the original intact; avoid transcoding when Safari can play it."""
+    """Produce one fast-start MP4; retain input only if processing fails."""
     output = SAVED_DIR / (key + ".mp4")
+    staging = SAVED_DIR / (key + ".processing.mp4")
     original = SAVED_DIR / (key + ".original.mp4")
+    succeeded = False
     try:
         info = subprocess.run(
             ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(source)],
@@ -682,15 +686,26 @@ def process_uploaded_video(key, source):
         audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
         if not video:
             raise ValueError("Arquivo não contém uma faixa de vídeo.")
+        try:
+            frame_rate = float(Fraction(video.get("avg_frame_rate") or "0/1"))
+        except (ValueError, ZeroDivisionError):
+            frame_rate = 0
         compatible = (
             video.get("codec_name") == "h264" and
             int(video.get("width") or 0) <= 1920 and
             int(video.get("height") or 0) <= 1080 and
+            0 < frame_rate <= 30.1 and
             (not audio or audio.get("codec_name") == "aac")
         )
         if compatible:
-            # Hard links keep one physical copy, with identical video/audio quality.
-            os.link(source, output)
+            result = subprocess.run(
+                ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                 "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
+                 "-c", "copy", "-movflags", "+faststart", str(staging)],
+                capture_output=True, text=True, timeout=3600
+            )
+            if result.returncode:
+                raise RuntimeError("Não foi possível otimizar o MP4 sem perda de qualidade.")
         else:
             command = [
                 "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
@@ -699,21 +714,24 @@ def process_uploaded_video(key, source):
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                 "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.0",
                 "-c:a", "aac", "-b:a", "160k", "-ac", "2",
-                "-movflags", "+faststart", str(output)
+                "-movflags", "+faststart", str(staging)
             ]
             result = subprocess.run(command, capture_output=True, text=True, timeout=14400)
             if result.returncode:
                 raise RuntimeError("Não foi possível criar uma versão compatível com o iPad.")
-        if not output.is_file() or output.stat().st_size == 0:
-            raise RuntimeError("Arquivo convertido vazio.")
+        if not staging.is_file() or staging.stat().st_size == 0:
+            raise RuntimeError("Arquivo preparado vazio.")
+        os.replace(staging, output)
+        succeeded = True
         with LOCK:
             entries = saved_entries()
             if key in entries:
                 entries[key]["status"] = "pronto"
                 entries[key]["message"] = ""
+                entries[key]["optimized"] = True
                 write_saved_entries(entries)
     except Exception as error:
-        output.unlink(missing_ok=True)
+        staging.unlink(missing_ok=True)
         with LOCK:
             entries = saved_entries()
             if key in entries:
@@ -721,9 +739,10 @@ def process_uploaded_video(key, source):
                 entries[key]["message"] = str(error)[:160]
                 write_saved_entries(entries)
     finally:
-        # Old uploads use a .upload temporary source; chunked uploads use
-        # .original.mp4 and retain that file permanently.
-        if source != original:
+        staging.unlink(missing_ok=True)
+        # Keep the incoming file only if conversion failed, so it can be
+        # retried without another 5 GB upload. Successful videos keep one MP4.
+        if succeeded or source != original:
             source.unlink(missing_ok=True)
 
 
@@ -844,15 +863,26 @@ def complete_large_upload(key):
     return jsonify({"ok": True, "id": key, "status": "processando"})
 
 
-@app.get("/api/saved/original/<key>")
-def download_original(key):
+@app.post("/api/saved/optimize/<key>")
+def optimize_saved_video(key):
+    denied = require_admin()
+    if denied:
+        return denied
     if not re.fullmatch(r"[0-9a-f]{32}", key):
         abort(404)
-    path = SAVED_DIR / (key + ".original.mp4")
-    if not path.is_file():
-        abort(404)
-    return send_file(path, mimetype="video/mp4", conditional=True, as_attachment=True,
-                     download_name="retrotube-original.mp4")
+    source = SAVED_DIR / (key + ".original.mp4")
+    with LOCK:
+        entries = saved_entries()
+        if key not in entries or not source.is_file():
+            return json_error("O MP4 original não está disponível.", 404)
+        if entries[key].get("status") == "processando":
+            return json_error("O vídeo já está sendo preparado.", 409)
+        if shutil.disk_usage(VIDEO_DIR).free < source.stat().st_size + 100 * 1024**2:
+            return json_error("A VPS precisa de mais espaço livre para otimizar este filme.", 507)
+        entries[key]["status"] = "processando"
+        write_saved_entries(entries)
+    threading.Thread(target=process_uploaded_video, args=(key, source), daemon=True).start()
+    return jsonify({"ok": True, "status": "processando"})
 
 
 @app.post("/api/upload")
@@ -942,7 +972,7 @@ def play_saved_video(key):
     path = SAVED_DIR / (key + ".mp4")
     if not path.is_file():
         abort(404)
-    return send_file(path, mimetype="video/mp4", conditional=True, max_age=86400)
+    return send_file(path, mimetype="video/mp4", conditional=True, max_age=0)
 
 
 

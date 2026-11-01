@@ -13,6 +13,7 @@
   var qualityPicker = document.getElementById("quality-picker");
   var qualitySelect = document.getElementById("quality-select");
   var currentQuality = 360;
+  var qualityManuallySelected = false;
   var status = document.getElementById("video-status");
   var title = document.getElementById("video-title");
   var keyPanel = document.getElementById("api-settings");
@@ -153,11 +154,11 @@
     player.removeAttribute("src");
     player.load();
     currentQuality = 360;
+    qualityManuallySelected = false;
     qualityPicker.className = "quality-picker";
     qualitySelect.disabled = true;
     qualitySelect.innerHTML = "";
     textNode(qualitySelect, "option", "Verificando...");
-    prepareVideo(id, currentQuality);
     loadVideoQualities(id);
     showRelatedVideos(id, peer ? "peertube" : daily ? "dailymotion" : "youtube");
     document.getElementById("youtube-link").href = peer ? original : daily ?
@@ -225,18 +226,24 @@
         count++;
       }
       if (!count) {
-        textNode(qualitySelect, "option", "Indisponível").value = "";
-        qualitySelect.disabled = true;
+        textNode(qualitySelect, "option", "360p (padrão)").value = "360";
+        qualitySelect.disabled = false;
+        currentQuality = 360;
       } else {
         qualitySelect.disabled = false;
+        if (!qualityManuallySelected) {
+          currentQuality = Math.max.apply(null, Object.keys(allowed).map(Number));
+        }
         qualitySelect.value = String(currentQuality);
       }
+      prepareVideo(id, currentQuality);
     });
     qualitySelect.onchange = function () {
       var quality = Number(qualitySelect.value);
       if (quality !== 360 && quality !== 480 && quality !== 720 && quality !== 1080) return;
       if (quality === currentQuality) return;
       currentQuality = quality;
+      qualityManuallySelected = true;
       if (player.pause) player.pause();
       player.removeAttribute("src");
       player.load();

@@ -69,6 +69,12 @@
     #related h2{font-size:22px;margin:3px 0 7px}
     #related .item{width:47.8%;margin:0 1% 18px;min-height:260px}
     #related .item>a:first-child,#related .thumb{height:180px}
+    .library-link{display:inline-block;margin-left:12px;padding:11px 16px;background:#fff;color:#d72833;border-radius:8px;font-weight:bold}
+    .saved-item{padding:12px 0;border-bottom:1px solid #ddd}
+    .saved-item a{font-weight:bold}
+    .saved-item .muted{margin:4px 0}
+    #upload-form{margin:18px 0;padding:15px;border:1px solid #e5e5e5;border-radius:9px}
+    #upload-form input{max-width:100%;margin:6px 0}
     .hide{display:none!important}
     .footer{text-align:center;color:#999da6;font-size:12px;padding:20px}
     body.dark{background:#0f1012;color:#f2f2f3}
@@ -150,19 +156,30 @@
       <h1>Seus vídeos favoritos, num só lugar.</h1>
       <p>Pesquise, escolha e assista diretamente no RetroTube. Uma experiência simples e familiar, feita especialmente para o Safari antigo.</p>
       <p class="notice">O PeerTube funciona sem chave de API. Nossa VPS prepara os vídeos disponíveis em um formato compatível com o iPad, sem depender de outro computador.</p>
-      <p><a href="?demo=1" id="demo-link" class="demo-button">▶ Testar o reprodutor</a></p>
+      <p><a href="?demo=1" id="demo-link" class="demo-button">▶ Testar o reprodutor</a><a href="?saved=1" id="saved-link" class="library-link">★ Vídeos Salvos</a></p>
       <div class="theme-picker" role="group" aria-label="Escolher aparência do RetroTube">
         <span class="theme-label">Aparência do site</span>
         <button type="button" id="theme-light" class="theme-option selected" aria-pressed="true">☀ Tema claro</button>
         <button type="button" id="theme-dark" class="theme-option" aria-pressed="false">☾ Tema escuro</button>
       </div>
     </div>
+    <div id="saved" class="panel hide">
+      <h1>★ Vídeos Salvos</h1>
+      <p class="muted">Estes vídeos não expiram após 72 horas. Os uploads são convertidos para o iPad.</p>
+      <form id="upload-form" enctype="multipart/form-data">
+        <label for="upload-video"><strong>Enviar vídeo do computador (MP4)</strong></label>
+        <p><input id="upload-video" type="file" accept="video/mp4,.mp4" required></p>
+        <button type="submit">Enviar vídeo</button>
+        <p id="upload-status" class="muted"></p>
+      </form>
+      <div id="saved-list"></div>
+    </div>
     <div id="results" class="panel hide"></div>
     <div id="watch" class="panel hide">
       <video id="player" class="player" controls preload="metadata" webkit-playsinline playsinline></video>
       <h1 id="video-title">Abrindo vídeo…</h1>
       <p id="video-status" class="muted"></p>
-      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1" id="watch-demo-link">Testar reprodutor</a><span id="quality-picker" class="quality-picker"><label for="quality-select">Qualidade:</label><select id="quality-select" aria-label="Selecionar qualidade do vídeo" disabled><option>Verificando...</option></select></span></div>
+      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1" id="watch-demo-link">Testar reprodutor</a><button id="save-video" type="button" disabled>☆ Salvar vídeo</button><span id="quality-picker" class="quality-picker"><label for="quality-select">Qualidade:</label><select id="quality-select" aria-label="Selecionar qualidade do vídeo" disabled><option>Verificando...</option></select></span></div>
       <p class="muted">Vídeo preparado em H.264/AAC para o Safari antigo. Toque em reproduzir quando estiver pronto.</p>
       <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
@@ -174,6 +191,6 @@
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

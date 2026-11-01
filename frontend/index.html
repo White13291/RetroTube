@@ -65,6 +65,9 @@
     .player{display:block;width:100%;height:auto;min-height:260px;background:#08090c;border:0;border-radius:10px}
     .watch-actions{border-top:1px solid #edeef1;border-bottom:1px solid #edeef1;margin:18px 0;padding:12px 0;font-size:14px}
     .watch-actions a{display:inline-block;margin:3px 15px 3px 0;font-weight:bold}
+    .loop-toggle{display:inline-block;margin:3px 8px 3px 0;padding:8px 11px;background:#666a73;font-size:13px}
+    .loop-toggle.enabled{background:#25835b}
+    .loop-toggle.enabled:hover{background:#1f704c}
     .quality-picker{display:inline-block;margin:3px 0 3px 2px;font-size:14px;font-weight:bold}
     .quality-picker select{margin-left:5px;padding:8px 9px;border:1px solid #dadddf;background:#fff;color:#24262b;border-radius:7px;font:14px Arial,Helvetica,sans-serif}
     #back-to-search{display:inline-block;margin-top:8px}
@@ -188,7 +191,7 @@
       <video id="player" class="player" controls preload="metadata" webkit-playsinline playsinline></video>
       <h1 id="video-title">Abrindo vídeo…</h1>
       <p id="video-status" class="muted"></p>
-      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1" id="watch-demo-link">Testar reprodutor</a><button id="save-video" type="button" disabled>☆ Salvar vídeo</button><span id="quality-picker" class="quality-picker"><label for="quality-select">Qualidade:</label><select id="quality-select" aria-label="Selecionar qualidade do vídeo" disabled><option>Verificando...</option></select></span></div>
+      <div class="watch-actions"><a id="alternate-player" href="#">↻ Tentar novamente</a><a id="youtube-link" href="#">Abrir na plataforma original</a><a href="?demo=1" id="watch-demo-link">Testar reprodutor</a><button id="save-video" type="button" disabled>☆ Salvar vídeo</button><button type="button" id="loop-toggle" class="loop-toggle" aria-pressed="false">↻ Repetir: desligado</button><span id="quality-picker" class="quality-picker"><label for="quality-select">Qualidade:</label><select id="quality-select" aria-label="Selecionar qualidade do vídeo" disabled><option>Verificando...</option></select></span></div>
       <p class="muted">Vídeo preparado em H.264/AAC para o Safari antigo. Toque em reproduzir quando estiver pronto.</p>
       <p><a id="back-to-search" href="./">Voltar para a busca</a></p>
     </div>
@@ -200,6 +203,6 @@
     <div class="footer">RetroTube &bull; Interface leve para Safari antigo</div>
   </div>
   <noscript><p>Ative o JavaScript em Ajustes &gt; Safari &gt; Avançado. Esta página usa apenas JavaScript básico, compatível com o Safari 8.</p></noscript>
-  <script src="app.js?v=21"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

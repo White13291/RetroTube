@@ -226,9 +226,21 @@
           item.status === "erro" ? ("Erro: " + (item.message || "falha na conversão")) : "Vídeo salvo");
         note.className = "muted";
         if (item.original) {
-          var originalLink = textNode(row, "a", "Baixar MP4 original");
-          originalLink.href = "/api/saved/original/" + encodeURIComponent(item.id);
-          originalLink.className = "saved-original";
+          if (!item.optimized && item.status !== "processando") {
+            var optimize = textNode(row, "button", "Otimizar para o iPad");
+            optimize.type = "button";
+            optimize.className = "optimize-saved";
+            (function (savedId, button) {
+              button.onclick = function () {
+                if (!window.confirm("Preparar este filme para reprodução rápida? A VPS poderá levar algum tempo para convertê-lo. O arquivo de entrada será removido após a conclusão.")) return;
+                button.disabled = true;
+                adminPost("/api/saved/optimize/" + encodeURIComponent(savedId), "{}", function (error) {
+                  if (error) { button.disabled = false; window.alert(error); }
+                  else showSaved();
+                }, false);
+              };
+            }(item.id, optimize));
+          }
         }
         if (item.status !== "processando") {
           var remove = textNode(row, "button", "Excluir vídeo");
